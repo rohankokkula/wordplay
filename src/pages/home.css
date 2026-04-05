@@ -1,0 +1,31 @@
+.home-page {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3rem;
+  padding: 2rem;
+  color: #fff;
+  background: var(--bg);
+}
+
+.home-logo {
+  width: min(90vw, 480px);
+  height: auto;
+  display: block;
+}
+
+.home-enter {
+  color: rgba(255, 255, 255, 0.42);
+  text-decoration: none;
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.4em;
+  text-transform: lowercase;
+  transition: color 0.2s ease;
+}
+
+.home-enter:hover {
+  color: #fff;
+}
