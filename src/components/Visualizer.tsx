@@ -269,9 +269,8 @@ export function Visualizer({
         }
       }
 
-      // Lyrics UI disabled for now
-      // beatBlink();
-      // syncLyricsDom();
+      beatBlink();
+      syncLyricsDom();
 
       frameRef.current = requestAnimationFrame(draw);
     };
@@ -307,11 +306,11 @@ export function Visualizer({
     const energy = sum / bins / 255; // 0–1
 
     const prevAvg = energyAvgRef.current;
-    const smoothing = 0.85;
+    const smoothing = 0.75;
     energyAvgRef.current = prevAvg * smoothing + energy * (1 - smoothing);
 
-    const isBeat = energy > energyAvgRef.current + 0.12 && energy > 0.25;
-    const randomFlip = Math.random() < 0.06;
+    const isBeat = energy > energyAvgRef.current + 0.08 && energy > 0.18;
+    const randomFlip = Math.random() < 0.09;
 
     if (isBeat || randomFlip) {
       blinkWhiteRef.current = !blinkWhiteRef.current;
@@ -464,7 +463,16 @@ export function Visualizer({
           <div className="visualizer-idle-hint">CLICK TO CYCLE PRESETS</div>
         )}
 
-        {/* Lyrics UI disabled for now */}
+        <div
+          ref={windowRef}
+          className="viz-lyrics-window"
+          style={{ display: 'none', fontFamily: LYRIC_FONTS[0] }}
+          onClick={cycleLyricFont}
+        >
+          <div ref={rowPrevRef} className="viz-lyrics-row viz-lyrics-row--prev">{NBSP}</div>
+          <div ref={rowCurrRef} className="viz-lyrics-row viz-lyrics-row--current">{NBSP}</div>
+          <div ref={rowNextRef} className="viz-lyrics-row viz-lyrics-row--next">{NBSP}</div>
+        </div>
       </div>
     </div>
   );
