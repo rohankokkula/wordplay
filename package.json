@@ -1,8 +1,26 @@
 {
-  "name": "soberohan",
-  "private": true,
-  "version": "0.0.0",
+  "name": "wordplay",
+  "version": "1.0.0",
+  "description": "AI-powered DJ web app — dual decks, beat-synced crossfades, lyric-aware transitions, and YouTube search, all in the browser.",
   "type": "module",
+  "license": "MIT",
+  "author": "Rohan Kokkula",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rohankokkula/wordplay-render.git"
+  },
+  "keywords": [
+    "dj",
+    "web-audio",
+    "crossfade",
+    "beat-matching",
+    "lyrics",
+    "react",
+    "vite",
+    "butterchurn",
+    "yt-dlp",
+    "whisper"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

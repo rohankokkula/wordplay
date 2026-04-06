@@ -169,11 +169,6 @@ def _merge_yt_opts(base: dict) -> dict:
     return out
 
 
-def youtube_cookies_configured() -> bool:
-    """True if cookie auth is available for yt-dlp (browser, file, or b64)."""
-    return _yt_dlp_cookies_from_browser() is not None or _yt_dlp_cookiefile() is not None
-
-
 def youtube_cookie_health() -> dict:
     """Non-secret diagnostics for GET /health (debugging cookie + yt-dlp issues)."""
     browser = _yt_dlp_cookies_from_browser()
