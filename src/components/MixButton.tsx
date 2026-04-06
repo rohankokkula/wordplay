@@ -7,9 +7,11 @@ interface MixButtonProps {
   canStart: boolean;
   onStart: () => void;
   onStop: () => void;
+  /** Shown when the disc is disabled (e.g. lyrics / wordplay still indexing) */
+  waitHint?: string;
 }
 
-export function MixButton({ phase, canStart, onStart, onStop }: MixButtonProps) {
+export function MixButton({ phase, canStart, onStart, onStop, waitHint }: MixButtonProps) {
   const [poke, setPoke] = useState(false);
   const isActive = phase !== 'idle' && phase !== 'done';
   const isDone = phase === 'done';
@@ -23,7 +25,10 @@ export function MixButton({ phase, canStart, onStart, onStop }: MixButtonProps) 
 
   let status = 'Idle';
   let sublabel = 'Load both tracks to start';
-  if (canStart && phase === 'idle') {
+  if (!canStart && waitHint) {
+    status = 'Setup';
+    sublabel = waitHint;
+  } else if (canStart && phase === 'idle') {
     status = 'Ready';
     sublabel = 'Tap disc to start';
   } else if (phase === 'playingA' || phase === 'playingB') {

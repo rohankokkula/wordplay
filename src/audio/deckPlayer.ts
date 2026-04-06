@@ -26,8 +26,19 @@ export class DeckPlayer {
     this._offset = 0;
   }
 
+  /** Stop and drop the buffer so the deck is empty until a new file is loaded. */
+  clearBuffer() {
+    this.stop();
+    this.buffer = null;
+    this._offset = 0;
+  }
+
   get playing() {
     return this._playing;
+  }
+
+  get audioBuffer(): AudioBuffer | null {
+    return this.buffer;
   }
 
   get currentTime(): number {
@@ -101,7 +112,7 @@ export class DeckPlayer {
     }
   }
 
-  /** Schedule a gain ramp (for automix crossfade) */
+  /** Schedule a gain ramp (for crossfade) */
   rampVolume(target: number, durationSec: number) {
     const now = getAudioContext().currentTime;
     this.volumeNode.gain.setValueAtTime(this.volumeNode.gain.value, now);

@@ -8,6 +8,17 @@ export interface CuePoint {
   label: string;
 }
 
+/**
+ * A recurring vocal phrase — likely a chorus/hook.
+ * The transition engine prefers cutting at the START of these
+ * because hooks are where listeners expect repetition (e.g. "Tum se").
+ */
+export interface VocalHook {
+  time: number;
+  energy: number;
+  segmentIndex: number;
+}
+
 export interface TrackAnalysis {
   bpm: number;
   beatInterval: number;
@@ -19,6 +30,8 @@ export interface TrackAnalysis {
   energyProfile: Float32Array;
   dropTime: number;
   cuePoints: CuePoint[];
+  /** Detected repeating vocal entry points (chorus/hook starts). */
+  vocalHooks: VocalHook[];
 }
 
 export type DeckId = 'A' | 'B';

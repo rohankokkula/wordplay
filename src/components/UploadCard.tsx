@@ -1,9 +1,11 @@
 import { useRef, useCallback } from 'react';
 import type { DeckState, AutomixPhase } from '../audio/types';
+import { MusicSearch } from './MusicSearch';
 
 interface UploadCardProps {
   deck: DeckState;
   label: string;
+  deckId: 'A' | 'B';
   onLoadFile: (file: File) => void;
   accentColor: string;
   isActive: boolean;
@@ -26,6 +28,7 @@ const BAR_COUNT = 60;
 export function UploadCard({
   deck,
   label,
+  deckId,
   onLoadFile,
   accentColor,
   isActive,
@@ -76,7 +79,6 @@ export function UploadCard({
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
-      onClick={() => !deck.file && inputRef.current?.click()}
     >
       <input
         ref={inputRef}
@@ -90,7 +92,9 @@ export function UploadCard({
       />
 
       <div className="upload-header-row">
-        <div className="upload-label">{label}</div>
+        <div className="upload-header-track">
+          <div className="upload-label">{label}</div>
+        </div>
         {deck.isPlaying && isMixing && (
           <div className="upload-live-badge">
             <span className="upload-live-dot" aria-hidden />
@@ -109,17 +113,39 @@ export function UploadCard({
       {deck.error && <div className="upload-error">{deck.error}</div>}
 
       {!deck.file && !deck.isAnalyzing && (
-        <div className="upload-prompt">
-          Drop audio file here<br />or click to browse
-        </div>
+        <>
+          <div className="upload-card-actions">
+            <button
+              type="button"
+              className="upload-btn upload-btn--local"
+              aria-label={`Add track ${deckId} from local files`}
+              onClick={(e) => {
+                e.stopPropagation();
+                inputRef.current?.click();
+              }}
+            >
+              Add from local
+            </button>
+          </div>
+          <MusicSearch
+            variant="embedded"
+            targetDeck={deckId}
+            disabled={isMixing}
+            onAddToDeck={(_d, file) => onLoadFile(file)}
+          />
+        </>
       )}
 
       {deck.file && !deck.isAnalyzing && (
         <div className="upload-info">
-          <div className="upload-filename">{deck.file.name}</div>
+          <div className="upload-title-block">
+            <div className="upload-filename" title={deck.file.name}>
+              {deck.file.name}
+            </div>
+          </div>
           {deck.analysis && (
-            <div className="upload-meta">
-              <span className="upload-bpm">{deck.analysis.bpm} BPM</span>
+            <div className="upload-meta" role="group" aria-label="Track analysis">
+              <span className="upload-bpm">{Math.round(deck.analysis.bpm)} BPM</span>
               <span className="upload-duration">{fmtTime(deck.analysis.duration)}</span>
               {deck.analysis.vocalSegments.length > 0 && (
                 <span className="upload-vocals">
@@ -131,14 +157,18 @@ export function UploadCard({
 
           {deck.analysis && (
             <div
-              className={`upload-wave-track${waveformAccent ? '' : ' upload-wave-track--mono'}`}
+              className={`upload-wave-shell${waveformAccent ? '' : ' upload-wave-shell--mono'}`}
             >
+              <div
+                className={`upload-wave-track${waveformAccent ? '' : ' upload-wave-track--mono'}`}
+              >
               <div
                 className={`upload-miniwave${waveformAccent ? '' : ' upload-miniwave--mono'}`}
               >
                 {Array.from({ length: BAR_COUNT }, (_, i) => {
                   const idx = Math.floor((i / BAR_COUNT) * deck.analysis!.peaks.length);
-                  const h = Math.max(2, deck.analysis!.peaks[idx] * 28);
+                  const rawH = deck.analysis!.peaks[idx] * 28;
+                  const h = Math.max(2, Math.min(34, rawH));
                   const played = (i / BAR_COUNT) < progress;
                   const isDrop = i >= dropBarIdx && i < dropBarIdx + 3;
                   const isTransition =
@@ -188,15 +218,15 @@ export function UploadCard({
                   style={{ left: `${progress * 100}%` }}
                 />
               )}
-            </div>
-          )}
-
-          {deck.analysis && isMixing && deck.isPlaying && (
-            <div
-              className={`upload-time-row${waveformAccent ? '' : ' upload-time-row--mono'}`}
-            >
-              <span className="upload-time-current">{fmtTime(deck.currentTime)}</span>
-              <span className="upload-time-remaining">-{fmtTime(remaining)}</span>
+              </div>
+              {isMixing && deck.isPlaying && (
+                <div
+                  className={`upload-time-row${waveformAccent ? '' : ' upload-time-row--mono'}`}
+                >
+                  <span className="upload-time-current">{fmtTime(deck.currentTime)}</span>
+                  <span className="upload-time-remaining">-{fmtTime(remaining)}</span>
+                </div>
+              )}
             </div>
           )}
         </div>

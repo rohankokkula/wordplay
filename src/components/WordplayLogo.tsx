@@ -18,7 +18,7 @@ type Props = {
   title?: string;
 };
 
-/** Frame 8 wordmark + triangle; “o” uses OD_Compact_disc.svg (same asset as Automix). */
+/** Frame 8 wordmark + triangle; “o” uses OD_Compact_disc.svg (same asset as the deck disc). */
 export function WordplayLogo({ className, title = 'Wordplay' }: Props) {
   const rawId = useId();
   const clipId = `wp-logo-o-${rawId.replace(/:/g, '')}`;

@@ -1,0 +1,19 @@
+.venv/
+
+# Local Netscape cookies — never commit (use YT_DLP_COOKIES_FILE or YT_DLP_COOKIES_B64)
+cookies.txt
+
+# Regenerated at runtime (see music_fetch.MUSIC_DIR)
+music_cache/
+
+# Legacy / optional local dirs (not used by current API)
+output/
+uploads/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+.env.*

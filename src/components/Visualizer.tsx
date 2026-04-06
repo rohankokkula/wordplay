@@ -1,370 +1,471 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import type { AutomixPhase } from '../audio/types';
+import type { TimedLine } from '../lyrics/types';
+import {
+  findActiveLyricIndex,
+  LYRIC_TIMING_LEAD_SEC,
+} from '../lyrics/lyricSync';
+import butterchurn from 'butterchurn';
+import butterchurnPresets from 'butterchurn-presets';
 
-interface VisualizerProps {
+export interface VisualizerProps {
   analyser: AnalyserNode | null;
   phase: AutomixPhase;
-  blendProgress: number;
-  activeDeck: 'A' | 'B';
+  lyrics?: TimedLine[] | null;
+  getLyricTime?: () => number;
+  wordplayPhrase?: string | null;
 }
 
-interface Particle {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  maxLife: number;
-  size: number;
-  hue: number;
+const CURATED_PRESETS = [
+  'Flexi, martin + geiss - dedicated to the sherwin maxawow',
+  'Rovastar - Fractopia (Fantic Dancing Lights Mix)',
+  'Geiss - Cosmic Dust 2 - Flicker Fix',
+  'Flexi + stahlregen - jelly showoff parade',
+  'martin - castle in the air',
+  'Rovastar + Loadus - Psychedelic Highway',
+  'Flexi - predator-prey-4b',
+  'Geiss - Cauldron',
+  'Flexi, fishbrain + Geiss - The Machine Behind the Curtain',
+  'Unchained & Rovastar - Wormhole Pillars (Remix)',
+  'Flexi + Martin - cascading decay swing',
+  'Zylot - Spiral Artifact',
+  'Rovastar & Rocke - Sugar Rush (Angel Candy Mix)',
+  'Flexi - truly mind-expanding',
+  'Geiss + Flexi + Martin - disconnected',
+  'martin - liquid wood slow',
+];
+
+const PRESET_CYCLE_MS = 25_000;
+const NBSP = '\u00a0';
+
+const LYRIC_FONTS = [
+  '"Inter", sans-serif',
+  '"Permanent Marker", cursive',
+  '"Orbitron", sans-serif',
+  '"Righteous", sans-serif',
+  '"Concert One", sans-serif',
+  '"Audiowide", sans-serif',
+  '"Silkscreen", monospace',
+  '"Bungee Shade", system-ui',
+  '"Monoton", sans-serif',
+  '"Rubik Glitch", system-ui',
+  '"Press Start 2P", monospace',
+  '"Nabla", system-ui',
+];
+
+let _fallbackCtx: AudioContext | null = null;
+function getFallbackCtx(): AudioContext {
+  if (!_fallbackCtx) _fallbackCtx = new AudioContext();
+  return _fallbackCtx;
 }
 
-const NUM_BARS = 64;
-const TWO_PI = Math.PI * 2;
-const VISUAL_MODES = 3;
+function getCreateVisualizer(mod: unknown): typeof butterchurn.createVisualizer {
+  const m = mod as Record<string, unknown>;
+  if (typeof m.createVisualizer === 'function') return m.createVisualizer as typeof butterchurn.createVisualizer;
+  if (m.default && typeof (m.default as Record<string, unknown>).createVisualizer === 'function') {
+    return (m.default as typeof butterchurn).createVisualizer;
+  }
+  throw new Error('[Visualizer] butterchurn has no createVisualizer');
+}
+
+function getGetPresets(mod: unknown): typeof butterchurnPresets.getPresets {
+  const m = mod as Record<string, unknown>;
+  if (typeof m.getPresets === 'function') return m.getPresets as typeof butterchurnPresets.getPresets;
+  if (m.default && typeof (m.default as Record<string, unknown>).getPresets === 'function') {
+    return (m.default as typeof butterchurnPresets).getPresets;
+  }
+  throw new Error('[Visualizer] butterchurn-presets has no getPresets');
+}
 
 export function Visualizer({
   analyser,
   phase,
-  blendProgress,
-  activeDeck,
+  lyrics,
+  getLyricTime,
+  wordplayPhrase,
 }: VisualizerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const particlesRef = useRef<Particle[]>([]);
-  const pulseRef = useRef(0);
-  const prevEnergyRef = useRef(0);
+  const vizRef = useRef<ReturnType<typeof butterchurn.createVisualizer> | null>(null);
   const frameRef = useRef(0);
-  const modeRef = useRef(0);
-  const rotationRef = useRef(0);
-  const historyRef = useRef<number[]>([]);
+  const presetIdxRef = useRef(0);
+  const lastCycleRef = useRef(0);
+  const connectedRef = useRef<AnalyserNode | null>(null);
+  const allPresetsRef = useRef<Record<string, unknown> | null>(null);
+  const poolRef = useRef<string[]>([]);
+  const [ready, setReady] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [vizPaused, setVizPaused] = useState(false);
+  const vizPausedRef = useRef(false);
 
+  /* ── Lyric refs: all written imperatively from rAF, never via setState ── */
+  const rowPrevRef = useRef<HTMLDivElement>(null);
+  const rowCurrRef = useRef<HTMLDivElement>(null);
+  const rowNextRef = useRef<HTMLDivElement>(null);
+  const windowRef = useRef<HTMLDivElement>(null);
+  const lyricIdxRef = useRef(-1);
+  const fontIdxRef = useRef(0);
+  /* Beat-reactive blink state */
+  const blinkWhiteRef = useRef(true);
+  const freqDataRef = useRef<Uint8Array | null>(null);
+  const energyAvgRef = useRef(0);
+
+  const lyricsRef = useRef(lyrics);
+  lyricsRef.current = lyrics;
   const phaseRef = useRef(phase);
-  const blendProgressRef = useRef(blendProgress);
-  const activeDeckRef = useRef(activeDeck);
   phaseRef.current = phase;
-  blendProgressRef.current = blendProgress;
-  activeDeckRef.current = activeDeck;
+  const getLyricTimeRef = useRef(getLyricTime);
+  getLyricTimeRef.current = getLyricTime;
+  const wordplayPhraseRef = useRef(wordplayPhrase);
+  wordplayPhraseRef.current = wordplayPhrase;
 
-  const handleClick = useCallback(() => {
-    modeRef.current = (modeRef.current + 1) % VISUAL_MODES;
-  }, []);
-
-  const spawnParticles = useCallback((cx: number, cy: number, hue: number, count: number) => {
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * TWO_PI;
-      const speed = 1 + Math.random() * 4;
-      particlesRef.current.push({
-        x: cx, y: cy,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        life: 1,
-        maxLife: 0.4 + Math.random() * 1.2,
-        size: 2 + Math.random() * 4,
-        hue,
-      });
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+          setReady(true);
+          ro.disconnect();
+        }
+      }
+    });
+    ro.observe(container);
+    const rect = container.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      setReady(true);
+      ro.disconnect();
     }
+    return () => ro.disconnect();
   }, []);
 
   useEffect(() => {
+    const syncFs = () => {
+      const el = containerRef.current;
+      if (!el) return;
+      const fs =
+        document.fullscreenElement === el ||
+        (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement === el;
+      setIsFullscreen(fs);
+    };
+    document.addEventListener('fullscreenchange', syncFs);
+    document.addEventListener('webkitfullscreenchange', syncFs as EventListener);
+    syncFs();
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFs);
+      document.removeEventListener('webkitfullscreenchange', syncFs as EventListener);
+    };
+  }, []);
+
+  const toggleFullscreen = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const el = containerRef.current;
+    if (!el) return;
+    try {
+      const fs =
+        document.fullscreenElement === el ||
+        (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement === el;
+      if (fs) {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else (document as unknown as { webkitExitFullscreen?: () => Promise<void> }).webkitExitFullscreen?.();
+      } else if (el.requestFullscreen) {
+        await el.requestFullscreen();
+      } else {
+        await (el as unknown as { webkitRequestFullscreen?: () => Promise<void> }).webkitRequestFullscreen?.();
+      }
+    } catch (err) {
+      console.warn('[Visualizer] fullscreen:', err);
+    }
+  }, []);
+
+  const toggleVizPause = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setVizPaused((p) => {
+      const next = !p;
+      vizPausedRef.current = next;
+      return next;
+    });
+  }, []);
+
+  /* ── Butterchurn init ── */
+  useEffect(() => {
+    if (!ready) return;
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
 
-    const ctx = canvas.getContext('2d')!;
-    const freqData = analyser ? new Uint8Array(analyser.frequencyBinCount) : null;
+    const ac = analyser
+      ? (analyser.context as AudioContext)
+      : getFallbackCtx();
 
-    const resize = () => {
-      const rect = container.getBoundingClientRect();
-      const dpr = devicePixelRatio || 1;
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      canvas.style.width = `${rect.width}px`;
-      canvas.style.height = `${rect.height}px`;
-    };
+    const rect = container.getBoundingClientRect();
+    const w = Math.max(1, Math.round(rect.width));
+    const h = Math.max(1, Math.round(rect.height));
+    canvas.width = w;
+    canvas.height = h;
 
-    const ro = new ResizeObserver(resize);
+    let createViz: typeof butterchurn.createVisualizer;
+    let loadPresets: typeof butterchurnPresets.getPresets;
+    try {
+      createViz = getCreateVisualizer(butterchurn);
+      loadPresets = getGetPresets(butterchurnPresets);
+    } catch (err) {
+      console.error(err);
+      setInitError(String(err));
+      return;
+    }
+
+    let viz: ReturnType<typeof butterchurn.createVisualizer>;
+    try {
+      viz = createViz(ac, canvas, { width: w, height: h, pixelRatio: window.devicePixelRatio || 1 });
+    } catch (err) {
+      console.error('[Visualizer] createVisualizer failed:', err);
+      setInitError(`WebGL init failed: ${err}`);
+      return;
+    }
+
+    vizRef.current = viz;
+    setInitError(null);
+
+    if (analyser && connectedRef.current !== analyser) {
+      try { viz.connectAudio(analyser); connectedRef.current = analyser; }
+      catch (err) { console.warn('[Visualizer] connectAudio failed:', err); }
+    }
+
+    const presets = loadPresets();
+    allPresetsRef.current = presets;
+    const curated = CURATED_PRESETS.filter(k => k in presets);
+    const pool = curated.length >= 4 ? curated : Object.keys(presets);
+    poolRef.current = pool;
+    const startIdx = Math.floor(Math.random() * pool.length);
+    presetIdxRef.current = startIdx;
+    viz.loadPreset(presets[pool[startIdx]], 0.0);
+    lastCycleRef.current = performance.now();
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const nw = Math.max(1, Math.round(entry.contentRect.width));
+        const nh = Math.max(1, Math.round(entry.contentRect.height));
+        canvas.width = nw;
+        canvas.height = nh;
+        viz.setRendererSize(nw, nh);
+      }
+    });
     ro.observe(container);
-    resize();
 
+    /* ── Unified rAF loop: Butterchurn + imperative lyric DOM writes ── */
     const draw = () => {
-      const dpr = devicePixelRatio || 1;
-      const w = canvas.width / dpr;
-      const h = canvas.height / dpr;
-      const cx = w / 2;
-      const cy = h / 2;
-
-      const curPhase = phaseRef.current;
-      const curBlend = blendProgressRef.current;
-      const curDeck = activeDeckRef.current;
-      const mode = modeRef.current;
-
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, w, h);
-
-      let hue: number;
-      if (curPhase === 'blending') {
-        hue = 200 + curBlend * 130;
-      } else if (curDeck === 'B') {
-        hue = 330;
-      } else {
-        hue = 200;
-      }
-
-      if (analyser && freqData) analyser.getByteFrequencyData(freqData);
-
-      let avgEnergy = 0;
-      let bassEnergy = 0;
-      if (freqData) {
-        for (let i = 0; i < freqData.length; i++) avgEnergy += freqData[i];
-        avgEnergy /= freqData.length;
-        for (let i = 0; i < Math.min(8, freqData.length); i++) bassEnergy += freqData[i];
-        bassEnergy /= 8;
-      }
-
-      // Store history for waveform mode
-      historyRef.current.push(avgEnergy);
-      if (historyRef.current.length > 200) historyRef.current.shift();
-
-      const energyDelta = avgEnergy - prevEnergyRef.current;
-      if (energyDelta > 15 && avgEnergy > 80) {
-        pulseRef.current = 1;
-        if (curPhase === 'blending') {
-          spawnParticles(cx, cy, hue, 16);
-        } else if (curPhase !== 'idle' && curPhase !== 'done') {
-          spawnParticles(cx, cy, hue, 5);
-        }
-      }
-      prevEnergyRef.current = avgEnergy;
-      pulseRef.current *= 0.91;
-      rotationRef.current += 0.003 + (avgEnergy / 255) * 0.008;
-
-      const isActive = curPhase !== 'idle' && curPhase !== 'done';
-      const baseRadius = Math.min(w, h) * 0.22;
-      const pulseRadius = baseRadius + pulseRef.current * 35;
-
-      // Background glow
-      if (isActive) {
-        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, pulseRadius * 3);
-        grad.addColorStop(0, `hsla(${hue}, 80%, 15%, 0.2)`);
-        grad.addColorStop(1, 'transparent');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, w, h);
-      }
-
-      // ── MODE 0: Radial bars (original) ──
-      if (mode === 0 && freqData && isActive) {
-        // Inner circle
-        ctx.beginPath();
-        ctx.arc(cx, cy, pulseRadius * 0.4, 0, TWO_PI);
-        ctx.fillStyle = `hsla(${hue}, 60%, 6%, 0.85)`;
-        ctx.fill();
-
-        for (let i = 0; i < NUM_BARS; i++) {
-          const angle = (i / NUM_BARS) * TWO_PI - Math.PI / 2 + rotationRef.current;
-          const freqIdx = Math.floor((i / NUM_BARS) * freqData.length);
-          const val = freqData[freqIdx] / 255;
-          const barLen = val * baseRadius * 0.85;
-
-          const x1 = cx + Math.cos(angle) * pulseRadius;
-          const y1 = cy + Math.sin(angle) * pulseRadius;
-          const x2 = cx + Math.cos(angle) * (pulseRadius + barLen);
-          const y2 = cy + Math.sin(angle) * (pulseRadius + barLen);
-
-          ctx.strokeStyle = `hsla(${hue + i * 0.8}, 80%, ${50 + val * 30}%, ${0.4 + val * 0.6})`;
-          ctx.lineWidth = Math.max(1.5, (TWO_PI * pulseRadius) / NUM_BARS * 0.55);
-          ctx.lineCap = 'round';
-          ctx.beginPath();
-          ctx.moveTo(x1, y1);
-          ctx.lineTo(x2, y2);
-          ctx.stroke();
-        }
-
-        // Inner mirror
-        for (let i = 0; i < NUM_BARS; i++) {
-          const angle = (i / NUM_BARS) * TWO_PI - Math.PI / 2 + rotationRef.current;
-          const freqIdx = Math.floor((i / NUM_BARS) * freqData.length);
-          const val = freqData[freqIdx] / 255;
-          const barLen = val * baseRadius * 0.25;
-          const innerR = pulseRadius * 0.4;
-
-          ctx.strokeStyle = `hsla(${hue + i}, 70%, 60%, ${val * 0.35})`;
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(cx + Math.cos(angle) * innerR, cy + Math.sin(angle) * innerR);
-          ctx.lineTo(cx + Math.cos(angle) * (innerR - barLen), cy + Math.sin(angle) * (innerR - barLen));
-          ctx.stroke();
+      if (!vizPausedRef.current) {
+        viz.render();
+        const now = performance.now();
+        if (now - lastCycleRef.current > PRESET_CYCLE_MS) {
+          lastCycleRef.current = now;
+          const nextIdx = (presetIdxRef.current + 1) % pool.length;
+          presetIdxRef.current = nextIdx;
+          viz.loadPreset(presets[pool[nextIdx]], 3.0);
         }
       }
 
-      // ── MODE 1: Oscilloscope ring ──
-      if (mode === 1 && freqData && isActive) {
-        const history = historyRef.current;
-
-        // Outer waveform ring
-        ctx.beginPath();
-        for (let i = 0; i < NUM_BARS; i++) {
-          const angle = (i / NUM_BARS) * TWO_PI - Math.PI / 2;
-          const freqIdx = Math.floor((i / NUM_BARS) * freqData.length);
-          const val = freqData[freqIdx] / 255;
-          const r = pulseRadius + val * baseRadius * 0.6;
-          const x = cx + Math.cos(angle) * r;
-          const y = cy + Math.sin(angle) * r;
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-        ctx.strokeStyle = `hsla(${hue}, 80%, 65%, 0.7)`;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Inner filled shape
-        ctx.beginPath();
-        for (let i = 0; i < NUM_BARS; i++) {
-          const angle = (i / NUM_BARS) * TWO_PI - Math.PI / 2;
-          const freqIdx = Math.floor((i / NUM_BARS) * freqData.length);
-          const val = freqData[freqIdx] / 255;
-          const r = pulseRadius * 0.5 + val * baseRadius * 0.3;
-          const x = cx + Math.cos(angle) * r;
-          const y = cy + Math.sin(angle) * r;
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, pulseRadius);
-        grad.addColorStop(0, `hsla(${hue}, 90%, 50%, 0.15)`);
-        grad.addColorStop(1, `hsla(${hue}, 80%, 40%, 0.05)`);
-        ctx.fillStyle = grad;
-        ctx.fill();
-
-        // Horizontal wave from history
-        ctx.beginPath();
-        const waveY = cy + pulseRadius + 40;
-        for (let i = 0; i < history.length; i++) {
-          const x = (i / history.length) * w;
-          const y = waveY - (history[i] / 255) * 20;
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        }
-        ctx.strokeStyle = `hsla(${hue}, 70%, 60%, 0.4)`;
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-      }
-
-      // ── MODE 2: Kaleidoscope ──
-      if (mode === 2 && freqData && isActive) {
-        const segments = 8;
-        ctx.save();
-        ctx.translate(cx, cy);
-
-        for (let s = 0; s < segments; s++) {
-          ctx.save();
-          ctx.rotate((s / segments) * TWO_PI + rotationRef.current * 2);
-          if (s % 2 === 1) ctx.scale(1, -1);
-
-          for (let i = 0; i < 32; i++) {
-            const freqIdx = Math.floor((i / 32) * freqData.length);
-            const val = freqData[freqIdx] / 255;
-            const r = 20 + i * (baseRadius * 0.04);
-            const spread = val * 25;
-            const x = r;
-            const y = spread * Math.sin(rotationRef.current * 3 + i * 0.3);
-
-            ctx.beginPath();
-            ctx.arc(x, y, 1.5 + val * 4, 0, TWO_PI);
-            ctx.fillStyle = `hsla(${hue + i * 4 + s * 15}, 85%, ${45 + val * 35}%, ${0.3 + val * 0.5})`;
-            ctx.fill();
-          }
-
-          ctx.restore();
-        }
-        ctx.restore();
-
-        // Center glow
-        const cGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseRadius * 0.5);
-        cGrad.addColorStop(0, `hsla(${hue}, 80%, 30%, ${0.1 + bassEnergy / 800})`);
-        cGrad.addColorStop(1, 'transparent');
-        ctx.fillStyle = cGrad;
-        ctx.beginPath();
-        ctx.arc(cx, cy, baseRadius * 0.5, 0, TWO_PI);
-        ctx.fill();
-      }
-
-      // Orbit ring (all modes)
-      if (isActive) {
-        ctx.beginPath();
-        ctx.arc(cx, cy, pulseRadius, 0, TWO_PI);
-        ctx.strokeStyle = `hsla(${hue}, 70%, 50%, 0.12)`;
-        ctx.lineWidth = 1;
-        ctx.stroke();
-      }
-
-      // Blend progress arc
-      if (curPhase === 'blending' && curBlend > 0) {
-        ctx.beginPath();
-        ctx.arc(cx, cy, pulseRadius + 10, -Math.PI / 2, -Math.PI / 2 + TWO_PI * curBlend);
-        ctx.strokeStyle = `hsla(${hue}, 85%, 65%, 0.8)`;
-        ctx.lineWidth = 3;
-        ctx.lineCap = 'round';
-        ctx.stroke();
-      }
-
-      // Particles
-      const dt = 1 / 60;
-      const alive: Particle[] = [];
-      for (const p of particlesRef.current) {
-        p.x += p.vx;
-        p.y += p.vy;
-        p.vx *= 0.97;
-        p.vy *= 0.97;
-        p.life -= dt / p.maxLife;
-        if (p.life <= 0) continue;
-        alive.push(p);
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size * p.life, 0, TWO_PI);
-        ctx.fillStyle = `hsla(${p.hue}, 85%, 70%, ${p.life * 0.75})`;
-        ctx.fill();
-      }
-      particlesRef.current = alive;
-
-      // ── Center text (minimal — track info moved to now-playing bar) ──
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      if (!isActive) {
-        ctx.font = '500 15px Inter, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.2)';
-        ctx.fillText('TAP TO CHANGE VISUAL', cx, cy);
-      } else {
-        if (curPhase === 'blending') {
-          ctx.font = '700 14px Inter, sans-serif';
-          const blink = 0.5 + Math.sin(Date.now() / 200) * 0.4;
-          ctx.fillStyle = `hsla(${hue}, 85%, 80%, ${blink})`;
-          ctx.fillText('BLENDING', cx, cy);
-        }
-      }
-
-      // Mode indicator (top-right)
-      if (isActive) {
-        const modeLabels = ['RADIAL', 'WAVE', 'KALEIDOSCOPE'];
-        ctx.font = '600 10px Inter, sans-serif';
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'top';
-        ctx.fillStyle = 'rgba(255,255,255,0.2)';
-        ctx.fillText(modeLabels[mode], w - 10, 10);
-      }
+      // Lyrics UI disabled for now
+      // beatBlink();
+      // syncLyricsDom();
 
       frameRef.current = requestAnimationFrame(draw);
     };
-
     frameRef.current = requestAnimationFrame(draw);
 
-    return () => {
-      cancelAnimationFrame(frameRef.current);
-      ro.disconnect();
-    };
-  }, [analyser, spawnParticles]);
+    return () => { cancelAnimationFrame(frameRef.current); ro.disconnect(); };
+  }, [analyser, ready]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * Beat-reactive blink: read analyser energy each frame, toggle white/black
+   * when a transient (beat) is detected. Between beats, randomly flip with
+   * low probability so it still feels alive.
+   */
+  const beatBlink = useCallback(() => {
+    const prev = rowPrevRef.current;
+    const curr = rowCurrRef.current;
+    const next = rowNextRef.current;
+    if (!prev || !curr || !next) return;
+
+    const an = analyser;
+    if (!an) return;
+
+    if (!freqDataRef.current || freqDataRef.current.length !== an.frequencyBinCount) {
+      freqDataRef.current = new Uint8Array(an.frequencyBinCount);
+    }
+    const fd = freqDataRef.current;
+    an.getByteFrequencyData(fd);
+
+    // Low-frequency energy (kick/snare range, bins 0-15 ≈ 0-650 Hz)
+    let sum = 0;
+    const bins = Math.min(16, fd.length);
+    for (let i = 0; i < bins; i++) sum += fd[i];
+    const energy = sum / bins / 255; // 0–1
+
+    const prevAvg = energyAvgRef.current;
+    const smoothing = 0.85;
+    energyAvgRef.current = prevAvg * smoothing + energy * (1 - smoothing);
+
+    const isBeat = energy > energyAvgRef.current + 0.12 && energy > 0.25;
+    const randomFlip = Math.random() < 0.06;
+
+    if (isBeat || randomFlip) {
+      blinkWhiteRef.current = !blinkWhiteRef.current;
+    }
+
+    const w = blinkWhiteRef.current;
+    const currColor = w ? '#ffffff' : '#000000';
+    const prevNextColor = w ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.6)';
+
+    curr.style.color = currColor;
+    prev.style.color = prevNextColor;
+    next.style.color = prevNextColor;
+  }, [analyser]);
+
+  /**
+   * Pure-DOM lyric sync — runs inside the Butterchurn rAF loop.
+   * Reads audio time, finds the active index, writes textContent directly.
+   * No React setState, no CSS transitions, no batching delay.
+   */
+  const syncLyricsDom = useCallback(() => {
+    const win = windowRef.current;
+    const prev = rowPrevRef.current;
+    const curr = rowCurrRef.current;
+    const next = rowNextRef.current;
+    if (!win || !prev || !curr || !next) return;
+
+    const p = phaseRef.current;
+    const isActive = p !== 'idle' && p !== 'done';
+    const isBlending = p === 'blending';
+
+    if (!isActive) {
+      if (win.style.display !== 'none') win.style.display = 'none';
+      lyricIdxRef.current = -1;
+      return;
+    }
+
+    // During blending: show wordplay text in the same 3-row strip
+    if (isBlending) {
+      if (win.style.display === 'none') win.style.display = '';
+      const wp = wordplayPhraseRef.current;
+      const label = wp ? `WORDPLAYING "${wp}"` : 'WORDPLAYING';
+
+      if (curr.textContent !== label) {
+        prev.textContent = NBSP;
+        curr.textContent = label;
+        next.textContent = NBSP;
+        curr.classList.add('viz-lyrics-row--wp');
+      }
+      lyricIdxRef.current = -1;
+      return;
+    }
+
+    // Normal playback: sync lyrics from audio clock
+    curr.classList.remove('viz-lyrics-row--wp');
+
+    const lines = lyricsRef.current;
+    const getTime = getLyricTimeRef.current;
+    if (!lines?.length || !getTime) {
+      if (win.style.display !== 'none') win.style.display = 'none';
+      lyricIdxRef.current = -1;
+      return;
+    }
+
+    if (win.style.display === 'none') win.style.display = '';
+
+    const t = getTime() + LYRIC_TIMING_LEAD_SEC;
+    const idx = findActiveLyricIndex(lines, t);
+    if (idx < 0 || idx === lyricIdxRef.current) return;
+
+    lyricIdxRef.current = idx;
+    prev.textContent = idx > 0 ? lines[idx - 1].text : NBSP;
+    curr.textContent = lines[idx].text;
+    next.textContent = idx < lines.length - 1 ? lines[idx + 1].text : NBSP;
+  }, []);
+
+  const cycleLyricFont = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const win = windowRef.current;
+    if (!win) return;
+    fontIdxRef.current = (fontIdxRef.current + 1) % LYRIC_FONTS.length;
+    win.style.fontFamily = LYRIC_FONTS[fontIdxRef.current];
+  }, []);
+
+  const cyclePreset = useCallback(() => {
+    if (!vizRef.current || !allPresetsRef.current || poolRef.current.length === 0) return;
+    presetIdxRef.current = (presetIdxRef.current + 1) % poolRef.current.length;
+    const name = poolRef.current[presetIdxRef.current];
+    vizRef.current.loadPreset(allPresetsRef.current[name], 2.0);
+  }, []);
+
+  const handleClick = useCallback(() => {
+    const ac = analyser?.context as AudioContext | undefined;
+    if (ac?.state === 'suspended') ac.resume();
+    cyclePreset();
+  }, [cyclePreset, analyser]);
 
   return (
-    <div ref={containerRef} className="visualizer" onClick={handleClick}>
-      <canvas ref={canvasRef} className="visualizer-canvas" />
+    <div className="visualizer" onClick={handleClick}>
+      <div ref={containerRef} className="visualizer-inner">
+        <canvas ref={canvasRef} className="visualizer-canvas" />
+
+        <div className="visualizer-toolbar">
+          <button
+            type="button"
+            className="visualizer-icon-btn"
+            title={vizPaused ? 'Resume visualizer' : 'Pause visualizer'}
+            aria-label={vizPaused ? 'Resume visualizer' : 'Pause visualizer'}
+            aria-pressed={vizPaused}
+            onClick={toggleVizPause}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {vizPaused ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M6 5h4v14H6V5zm8 0h4v14h-4V5z" />
+              </svg>
+            )}
+          </button>
+          <button
+            type="button"
+            className="visualizer-icon-btn"
+            title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            aria-pressed={isFullscreen}
+            onClick={toggleFullscreen}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {isFullscreen ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+              </svg>
+            )}
+          </button>
+        </div>
+
+        {initError && (
+          <div className="visualizer-idle-hint" style={{ color: 'rgba(255,100,100,0.5)' }}>
+            {initError}
+          </div>
+        )}
+
+        {!initError && phase === 'idle' && (
+          <div className="visualizer-idle-hint">CLICK TO CYCLE PRESETS</div>
+        )}
+
+        {/* Lyrics UI disabled for now */}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import type { VocalSegment, CuePoint } from '../audio/types';
+import type { VocalSegment, CuePoint, VocalHook } from '../audio/types';
 
 export interface AnalysisResult {
   bpm: number;
@@ -11,6 +11,7 @@ export interface AnalysisResult {
   energyProfile: Float32Array;
   dropTime: number;
   cuePoints: CuePoint[];
+  vocalHooks: VocalHook[];
 }
 
 const PEAK_SAMPLES_PER_PIXEL = 512;
@@ -25,11 +26,12 @@ export function analyzeTrackRaw(
   const energyProfile = buildEnergyProfile(channelData, sampleRate);
   const vocalSegments = detectVocals(channelData, sampleRate);
   const dropTime = findDropTime(energyProfile, duration);
+  const vocalHooks = detectVocalHooks(vocalSegments, energyProfile, duration, beatInterval);
   const cuePoints = buildCuePoints(firstBeatTime, vocalSegments, dropTime, duration);
 
   return {
     bpm, beatInterval, firstBeatTime, beatTimes, duration, peaks,
-    vocalSegments, energyProfile, dropTime, cuePoints,
+    vocalSegments, energyProfile, dropTime, cuePoints, vocalHooks,
   };
 }
 
@@ -236,6 +238,65 @@ function detectVocals(data: Float32Array, sampleRate: number): VocalSegment[] {
   }
 
   return merged;
+}
+
+// ── Vocal hooks (chorus/hook entry detection) ──────────────────
+// Finds vocal segment starts that are likely chorus/hook entries:
+// - segment is preceded by a low-energy gap (verse→chorus lift)
+// - segment has higher energy than average (chorus = louder)
+// - recurring pattern: similar energy profile at phrase boundaries
+
+function detectVocalHooks(
+  vocalSegments: VocalSegment[],
+  energyProfile: Float32Array,
+  duration: number,
+  beatInterval: number,
+): VocalHook[] {
+  if (vocalSegments.length < 2) return [];
+
+  const windowDur = duration / energyProfile.length;
+  const hooks: VocalHook[] = [];
+
+  let totalSegEnergy = 0;
+  const segEnergies: number[] = [];
+  for (const seg of vocalSegments) {
+    const startIdx = Math.floor(seg.start / windowDur);
+    const endIdx = Math.min(Math.ceil(seg.end / windowDur), energyProfile.length);
+    let sum = 0;
+    let count = 0;
+    for (let i = startIdx; i < endIdx; i++) {
+      sum += energyProfile[i];
+      count++;
+    }
+    const avg = count > 0 ? sum / count : 0;
+    segEnergies.push(avg);
+    totalSegEnergy += avg;
+  }
+  const meanSegEnergy = totalSegEnergy / vocalSegments.length;
+
+  for (let i = 0; i < vocalSegments.length; i++) {
+    const seg = vocalSegments[i];
+    const energy = segEnergies[i];
+
+    const gapBefore = i === 0
+      ? seg.start
+      : seg.start - vocalSegments[i - 1].end;
+
+    const isAfterGap = gapBefore > beatInterval * 2;
+    const isLoud = energy >= meanSegEnergy * 0.85;
+    const isLongEnough = (seg.end - seg.start) > beatInterval * 3;
+
+    if ((isAfterGap && isLoud) || (isLoud && isLongEnough)) {
+      hooks.push({
+        time: seg.start,
+        energy,
+        segmentIndex: i,
+      });
+    }
+  }
+
+  hooks.sort((a, b) => b.energy - a.energy);
+  return hooks;
 }
 
 // ── Cue points ─────────────────────────────────────────────────

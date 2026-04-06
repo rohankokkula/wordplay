@@ -3,6 +3,8 @@ import type { LogEntry } from '../audio/types';
 
 interface StatusLogProps {
   entries: LogEntry[];
+  /** e.g. mobile strip below transport — one line per row, scroll */
+  variant?: 'default' | 'below-play';
 }
 
 function fmtTimestamp(sec: number): string {
@@ -11,15 +13,20 @@ function fmtTimestamp(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export function StatusLog({ entries }: StatusLogProps) {
+export function StatusLog({ entries, variant = 'default' }: StatusLogProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [entries.length]);
 
+  const rootClass =
+    variant === 'below-play'
+      ? 'status-log status-log--below-play'
+      : 'status-log';
+
   return (
-    <div className="status-log">
+    <div className={rootClass}>
       <div className="status-log-header">LIVE LOG</div>
       <div className="status-log-entries">
         {entries.length === 0 && (

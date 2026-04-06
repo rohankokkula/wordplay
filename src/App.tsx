@@ -6,22 +6,20 @@ import {
   decodeFile,
   getAnalyser,
   setMasterVolume as applyMasterGain,
-  suspendAudioOutput,
-  resumeAudioOutput,
   getAudioContext,
 } from './audio/mixer';
 import { DeckPlayer } from './audio/deckPlayer';
 import { analyzeTrackAsync } from './analysis/analyzeTrack';
 import { AutomixController, type AutomixState } from './automix/controller';
-import { transitionSegmentForOutgoingDeck } from './automix/transitionPlan';
-import { UploadCard } from './components/UploadCard';
 import { Visualizer } from './components/Visualizer';
-import { MixButton } from './components/MixButton';
 import { StatusLog } from './components/StatusLog';
-import { MusicSearch } from './components/MusicSearch';
-import { PlayerDock } from './components/PlayerDock';
-import { AutomixBottomBar } from './components/AutomixBottomBar';
-import { playTurntableWindDown } from './audio/turntableWindDown';
+import { TrackTimeline } from './components/TrackTimeline';
+import { WordplayLogo } from './components/WordplayLogo';
+import { playDiscSfx } from './audio/turntableWindDown';
+import { useMediaQuery } from './hooks/useMediaQuery';
+import { GENRE_PRESETS, GENRE_LIST, type GenreId } from './genre/genrePresets';
+import { fetchSyncedLyrics, findCommonPhrases, transcribeWithWhisper } from './lyrics/lyricsService';
+import type { TimedLine, WordMatch } from './lyrics/types';
 
 const INITIAL_DECK: (id: 'A' | 'B') => DeckState = (id) => ({
   id,
@@ -49,28 +47,33 @@ function fmtTime(sec: number): string {
 }
 
 export default function App() {
+  const isNarrowLayout = useMediaQuery('(max-width: 800px)');
   const [deckA, setDeckA] = useState<DeckState>(() => INITIAL_DECK('A'));
   const [deckB, setDeckB] = useState<DeckState>(() => INITIAL_DECK('B'));
   const [phase, setPhase] = useState<AutomixPhase>('idle');
   const [blendProgress, setBlendProgress] = useState(0);
   const [activeDeck, setActiveDeck] = useState<'A' | 'B'>('A');
-  const [currentTrackName, setCurrentTrackName] = useState('');
-  const [currentBpm, setCurrentBpm] = useState(0);
+  const [, setCurrentTrackName] = useState('');
+  const [, setCurrentBpm] = useState(0);
   const [transitionInfo, setTransitionInfo] = useState('');
-  const [transitionSegment, setTransitionSegment] = useState<
-    AutomixState['transitionSegment']
-  >(null);
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
   const [blendBeats, setBlendBeats] = useState<number>(32);
-  const [masterVolume, setMasterVolumeState] = useState(1);
-  const [outputPaused, setOutputPaused] = useState(false);
+  const [genreStyle, setGenreStyleState] = useState<GenreId>('neutral');
+  const [, setOutputPaused] = useState(false);
+  const [lyricsA, setLyricsA] = useState<TimedLine[] | null>(null);
+  const [lyricsB, setLyricsB] = useState<TimedLine[] | null>(null);
+  const [wordMatches, setWordMatches] = useState<WordMatch[]>([]);
+  const [wordplayPhrase, setWordplayPhrase] = useState<string | null>(null);
+  const [lyricsResolved, setLyricsResolved] = useState({ a: false, b: false });
 
   const playerARef = useRef<DeckPlayer | null>(null);
   const playerBRef = useRef<DeckPlayer | null>(null);
   const automixRef = useRef<AutomixController | null>(null);
   const startTimeRef = useRef(0);
-  const preMuteMasterRef = useRef(1);
+  const activeDeckRef = useRef<'A' | 'B'>('A');
+  /** Incremented when a deck is cleared so in-flight loadFile runs ignore stale results. */
+  const loadGenRef = useRef({ A: 0, B: 0 });
 
   const addLog = useCallback((text: string, source: LogEntry['source']) => {
     const elapsed = (performance.now() / 1000) - startTimeRef.current;
@@ -95,7 +98,7 @@ export default function App() {
         setCurrentTrackName(state.currentTrackName);
         setCurrentBpm(state.currentBpm);
         setTransitionInfo(state.transitionInfo);
-        setTransitionSegment(state.transitionSegment);
+        setWordplayPhrase(state.wordplayPhrase);
       },
       addLog,
     );
@@ -104,8 +107,14 @@ export default function App() {
   }, [addLog]);
 
   useEffect(() => {
-    applyMasterGain(masterVolume);
-  }, [masterVolume]);
+    activeDeckRef.current = activeDeck;
+  }, [activeDeck]);
+
+  const getLyricTime = useCallback((): number => {
+    const d = activeDeckRef.current;
+    const p = d === 'A' ? playerARef.current : playerBRef.current;
+    return p?.currentTime ?? 0;
+  }, []);
 
   useEffect(() => {
     playerARef.current?.setVolume(deckA.volume);
@@ -124,6 +133,22 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (lyricsResolved.a && lyricsResolved.b && lyricsA && lyricsB) {
+      const matches = findCommonPhrases(lyricsA, lyricsB);
+      setWordMatches(matches);
+      automixRef.current?.setWordMatches(matches);
+      if (matches.length > 0) {
+        addLog(`Found ${matches.length} wordplay hook(s): "${matches[0].phrase}"`, 'system');
+      } else {
+        addLog('No overlapping lyric hooks between tracks', 'system');
+      }
+    } else {
+      setWordMatches([]);
+      automixRef.current?.setWordMatches([]);
+    }
+  }, [lyricsA, lyricsB, lyricsResolved.a, lyricsResolved.b, addLog]);
+
+  useEffect(() => {
     let raf = 0;
     const tick = () => {
       const pA = playerARef.current;
@@ -139,9 +164,11 @@ export default function App() {
   }, []);
 
   const loadFile = useCallback(async (deck: 'A' | 'B', file: File) => {
+    const gen = ++loadGenRef.current[deck];
     const setter = deck === 'A' ? setDeckA : setDeckB;
     const player = deck === 'A' ? playerARef.current! : playerBRef.current!;
     const src = deck === 'A' ? 'a' : 'b' as LogEntry['source'];
+    const rk = deck === 'A' ? 'a' : 'b' as 'a' | 'b';
 
     setter((p) => ({
       ...p,
@@ -152,17 +179,54 @@ export default function App() {
       analysis: null,
       error: null,
     }));
+    setLyricsResolved((r) => ({ ...r, [rk]: false }));
+    if (deck === 'A') setLyricsA(null);
+    else setLyricsB(null);
+
     addLog(`Loading: ${file.name}`, src);
 
     try {
       const buffer = await decodeFile(file);
+      if (loadGenRef.current[deck] !== gen) return;
       player.setBuffer(buffer);
       addLog(`Decoded: ${file.name} (${Math.round(buffer.duration)}s)`, src);
-      addLog('Analyzing BPM, vocals, energy...', src);
+      addLog('Analyzing audio + fetching synced lyrics…', src);
 
-      const analysis = await analyzeTrackAsync(buffer);
+      const [analysis, lrcLines] = await Promise.all([
+        analyzeTrackAsync(buffer),
+        fetchSyncedLyrics(file.name, buffer.duration),
+      ]);
+
+      if (loadGenRef.current[deck] !== gen) return;
+
       setter((p) => ({ ...p, buffer, analysis, isAnalyzing: false }));
       automixRef.current?.setAnalysis(deck, analysis, file.name);
+
+      let timed = lrcLines ?? [];
+      let lyricsSource = 'LRCLib';
+
+      if (timed.length === 0) {
+        addLog('LRCLib miss — transcribing with Whisper…', src);
+        const whisperLines = await transcribeWithWhisper(file);
+        if (loadGenRef.current[deck] !== gen) return;
+        if (whisperLines && whisperLines.length > 0) {
+          timed = whisperLines;
+          lyricsSource = 'Whisper';
+        }
+      }
+
+      if (deck === 'A') {
+        setLyricsA(timed);
+      } else {
+        setLyricsB(timed);
+      }
+      setLyricsResolved((r) => ({ ...r, [rk]: true }));
+
+      if (timed.length > 0) {
+        addLog(`Synced lyrics: ${timed.length} lines (${lyricsSource})`, src);
+      } else {
+        addLog('No lyrics found (LRCLib miss + Whisper unavailable)', src);
+      }
 
       addLog(`Analysis complete: ${analysis.bpm} BPM`, src);
       if (analysis.vocalSegments.length > 0) {
@@ -170,22 +234,61 @@ export default function App() {
       }
       addLog(`Drop detected at ${fmtTime(analysis.dropTime)}`, src);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unsupported audio format';
+      if (loadGenRef.current[deck] !== gen) return;
+      const raw = err instanceof Error ? err.message : String(err);
+      const msg = raw || 'Unsupported audio format';
       setter((p) => ({ ...p, isAnalyzing: false, error: msg }));
-      addLog(`Error: ${msg}`, src);
+      setLyricsResolved((r) => ({ ...r, [rk]: true }));
+      if (deck === 'A') setLyricsA([]);
+      else setLyricsB([]);
+      addLog(`Error (${deck}): ${msg}`, src);
+      console.error(`[loadFile ${deck}]`, err);
     }
   }, [addLog]);
 
+  const clearDeck = useCallback(
+    (deck: 'A' | 'B') => {
+      loadGenRef.current[deck]++;
+      const rk = deck === 'A' ? 'a' : 'b';
+      const src = deck === 'A' ? 'a' : 'b' as LogEntry['source'];
+
+      if (phase !== 'idle' && phase !== 'done') {
+        automixRef.current?.stop();
+        playerARef.current?.stop();
+        playerBRef.current?.stop();
+        setDeckA((p) => ({ ...p, isPlaying: false }));
+        setDeckB((p) => ({ ...p, isPlaying: false }));
+        setTransitionInfo('');
+      }
+
+      const player = deck === 'A' ? playerARef.current : playerBRef.current;
+      player?.clearBuffer();
+      automixRef.current?.clearDeckAnalysis(deck);
+
+      if (deck === 'A') {
+        setDeckA(INITIAL_DECK('A'));
+        setLyricsA(null);
+      } else {
+        setDeckB(INITIAL_DECK('B'));
+        setLyricsB(null);
+      }
+      setLyricsResolved((r) => ({ ...r, [rk]: true }));
+      addLog(`Deck ${deck} cleared — load another track`, src);
+    },
+    [addLog, phase],
+  );
+
   const handleStart = useCallback(() => {
+    void playDiscSfx();
     startTimeRef.current = performance.now() / 1000;
     setLogEntries([]);
     automixRef.current?.setBlendBeats(blendBeats);
-    addLog(`Starting automix (${blendBeats}-beat crossfade)...`, 'system');
+    addLog(`Starting (${blendBeats}-beat crossfade)...`, 'system');
     automixRef.current?.start();
   }, [addLog, blendBeats]);
 
   const handleStop = useCallback(() => {
-    void playTurntableWindDown();
+    void playDiscSfx();
     automixRef.current?.stop();
     playerARef.current?.stop();
     playerBRef.current?.stop();
@@ -197,6 +300,8 @@ export default function App() {
 
   const canStart = !!(deckA.analysis && deckB.analysis);
   const isMixing = phase !== 'idle' && phase !== 'done';
+
+  const activeLyrics = activeDeck === 'A' ? lyricsA : lyricsB;
 
   const beatPreview = useMemo(() => {
     const a = deckA.analysis;
@@ -210,44 +315,6 @@ export default function App() {
     };
   }, [deckA.analysis, deckB.analysis]);
 
-  const toggleAudioPause = useCallback(async () => {
-    const ac = getAudioContext();
-    if (ac.state === 'suspended') {
-      await resumeAudioOutput();
-    } else {
-      await suspendAudioOutput();
-    }
-  }, []);
-
-  const handleMasterVolume = useCallback((v: number) => {
-    setMasterVolumeState(v);
-    applyMasterGain(v);
-  }, []);
-
-  const handleDeckVolume = useCallback((deck: 'A' | 'B', v: number) => {
-    if (deck === 'A') setDeckA((p) => ({ ...p, volume: v }));
-    else setDeckB((p) => ({ ...p, volume: v }));
-  }, []);
-
-  const selectActiveDeck = useCallback(
-    (d: 'A' | 'B') => {
-      if (isMixing) return;
-      setActiveDeck(d);
-    },
-    [isMixing],
-  );
-
-  const toggleMuteMaster = useCallback(() => {
-    if (masterVolume < 0.005) {
-      const v = preMuteMasterRef.current > 0.01 ? preMuteMasterRef.current : 1;
-      setMasterVolumeState(v);
-      applyMasterGain(v);
-    } else {
-      preMuteMasterRef.current = masterVolume;
-      setMasterVolumeState(0);
-      applyMasterGain(0);
-    }
-  }, [masterVolume]);
 
   const selectBlendBeats = useCallback(
     (n: number) => {
@@ -258,77 +325,63 @@ export default function App() {
     [addLog],
   );
 
-  const activeDeckState = activeDeck === 'A' ? deckA : deckB;
-  const activeDur = activeDeckState.analysis?.duration ?? 0;
-  const activeTime = activeDeckState.currentTime;
-
-  const handleSeek = useCallback(
-    (ratio: number) => {
-      const d = activeDeckState.analysis?.duration ?? 0;
-      if (d <= 0) return;
-      const t = Math.max(0, Math.min(ratio * d, d - 0.01));
-      const p = activeDeck === 'A' ? playerARef.current : playerBRef.current;
-      p?.seek(t);
+  const selectGenre = useCallback(
+    (id: GenreId) => {
+      setGenreStyleState(id);
+      const preset = GENRE_PRESETS[id];
+      automixRef.current?.setGenreStyle(id);
+      setBlendBeats(preset.defaultBlendBeats);
+      automixRef.current?.setBlendBeats(preset.defaultBlendBeats);
+      addLog(`Genre: ${preset.label} (${preset.defaultBlendBeats}-beat default)`, 'system');
     },
-    [activeDeck, activeDeckState.analysis?.duration],
+    [addLog],
   );
 
-  const dockTitle = isMixing
-    ? currentTrackName
-    : activeDeckState.file?.name ?? '';
-  const dockBpm = isMixing ? currentBpm : activeDeckState.analysis?.bpm ?? 0;
-
-  const isActiveA = activeDeck === 'A' || phase === 'blending';
-  const isActiveB = activeDeck === 'B' || phase === 'blending';
-  const waveformAccentA =
-    deckA.isPlaying && (phase === 'blending' || activeDeck === 'A');
-  const waveformAccentB =
-    deckB.isPlaying && (phase === 'blending' || activeDeck === 'B');
-
-  const transitionSegA = useMemo(() => {
-    if (transitionSegment?.deck === 'A') {
-      return {
-        startSec: transitionSegment.startSec,
-        endSec: transitionSegment.endSec,
-      };
-    }
-    if (
-      (phase === 'idle' || phase === 'done') &&
-      deckA.analysis &&
-      deckB.analysis
-    ) {
-      return transitionSegmentForOutgoingDeck(deckA.analysis, 0, blendBeats);
-    }
-    return null;
-  }, [transitionSegment, phase, deckA.analysis, deckB.analysis, blendBeats]);
-
-  const transitionSegB = useMemo(() => {
-    if (transitionSegment?.deck === 'B') {
-      return {
-        startSec: transitionSegment.startSec,
-        endSec: transitionSegment.endSec,
-      };
-    }
-    return null;
-  }, [transitionSegment]);
+  const handleDeckSeek = useCallback((deck: 'A' | 'B', ratio: number) => {
+    const d = (deck === 'A' ? deckA : deckB).analysis?.duration ?? 0;
+    if (d <= 0) return;
+    const t = Math.max(0, Math.min(ratio * d, d - 0.01));
+    const p = deck === 'A' ? playerARef.current : playerBRef.current;
+    p?.seek(t);
+  }, [deckA, deckB]);
 
   return (
     <div className="app-layout">
-      <aside className="app-sidebar-left" aria-label="Blend length">
+      <aside className="app-sidebar-left" aria-label="Genre and blend length">
+        <div className="genre-panel">
+          <h2 className="genre-panel-title">GENRE STYLE</h2>
+          <p className="genre-panel-desc">
+            Shapes the rhythm, transitions, and feel of the mix.
+          </p>
+          <div className="genre-buttons">
+            {GENRE_LIST.map((gid) => {
+              const preset = GENRE_PRESETS[gid];
+              return (
+                <button
+                  key={gid}
+                  type="button"
+                  className={`genre-btn${genreStyle === gid ? ' active' : ''}`}
+                  disabled={isMixing}
+                  onClick={() => selectGenre(gid)}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="beat-panel">
           <h2 className="beat-panel-title">BLEND LENGTH</h2>
-          <p className="beat-panel-hint">
-            After both tracks are analyzed, pick how many beats the crossfade spans. Timing follows each
-            track&apos;s detected beat grid.
+          <p className="beat-panel-one-liner">
+            Bigger numbers mean the two songs overlap for longer when they mix.
           </p>
-          {beatPreview ? (
+          {beatPreview && (
             <p className="beat-panel-meta">
               A {Math.round(beatPreview.bpmA)} BPM
               {' · '}
               B <span className="deck-b">{Math.round(beatPreview.bpmB)} BPM</span>
             </p>
-          ) : (
-            <p className="beat-panel-meta dim">Load and analyze both tracks to preview durations.</p>
           )}
           <div className="beat-buttons">
             {BLEND_BEAT_OPTIONS.map((n) => {
@@ -355,92 +408,46 @@ export default function App() {
 
       <div className="app-main">
         <header className="app-header">
-          <h1 className="app-title">AUTOMIX DJ</h1>
-          <a href="/wordplay" className="wp-nav-link">WORDPLAY</a>
+          <WordplayLogo className="app-header-wordplay-logo" title="Wordplay" />
         </header>
-
-        <div className="uploads-row">
-          <UploadCard
-            deck={deckA}
-            label="TRACK A"
-            onLoadFile={(f) => loadFile('A', f)}
-            accentColor="#6ca8c4"
-            isActive={isActiveA}
-            waveformAccent={waveformAccentA}
-            phase={phase}
-            transitionSegment={transitionSegA}
-          />
-          <UploadCard
-            deck={deckB}
-            label="TRACK B"
-            onLoadFile={(f) => loadFile('B', f)}
-            accentColor="#c49a7a"
-            isActive={isActiveB}
-            waveformAccent={waveformAccentB}
-            phase={phase}
-            transitionSegment={transitionSegB}
-          />
-        </div>
 
         <div className="visualizer-section">
           <Visualizer
             analyser={analyserNode}
             phase={phase}
-            blendProgress={blendProgress}
-            activeDeck={activeDeck}
+            lyrics={activeLyrics}
+            getLyricTime={getLyricTime}
+            wordplayPhrase={wordplayPhrase}
           />
         </div>
 
-        <AutomixBottomBar>
-          <PlayerDock
-            hasAudio={!!(deckA.buffer || deckB.buffer)}
-            phase={phase}
-            isMixing={isMixing}
-            blendProgress={blendProgress}
-            activeDeck={activeDeck}
-            onSelectDeck={selectActiveDeck}
-            deckA={{
-              time: deckA.currentTime,
-              duration: deckA.analysis?.duration ?? deckA.buffer?.duration ?? 0,
-              volume: deckA.volume,
-              hasBuffer: !!deckA.buffer,
-            }}
-            deckB={{
-              time: deckB.currentTime,
-              duration: deckB.analysis?.duration ?? deckB.buffer?.duration ?? 0,
-              volume: deckB.volume,
-              hasBuffer: !!deckB.buffer,
-            }}
-            onDeckVolume={handleDeckVolume}
-            currentTrackName={dockTitle}
-            currentBpm={dockBpm}
-            transitionInfo={transitionInfo}
-            activeTime={activeTime}
-            activeDur={activeDur}
-            outputPaused={outputPaused}
-            masterVolume={masterVolume}
-            onTogglePause={toggleAudioPause}
-            onMasterVolume={handleMasterVolume}
-            onSeek={handleSeek}
-            onMuteToggle={toggleMuteMaster}
-            fmtTime={fmtTime}
-          />
-        </AutomixBottomBar>
+        <TrackTimeline
+          deckA={deckA}
+          deckB={deckB}
+          wordMatches={wordMatches}
+          onLoadFileA={(f) => loadFile('A', f)}
+          onLoadFileB={(f) => loadFile('B', f)}
+          onSeek={handleDeckSeek}
+          phase={phase}
+          activeDeck={activeDeck}
+          isMixing={isMixing}
+          blendProgress={blendProgress}
+          transitionInfo={transitionInfo}
+          canStart={canStart}
+          onStart={handleStart}
+          onStop={handleStop}
+          onClearDeck={clearDeck}
+        />
+
+        {isNarrowLayout && (
+          <StatusLog entries={logEntries} variant="below-play" />
+        )}
       </div>
 
-      {/* Right sidebar: MixButton at top, then log */}
       <aside className="app-sidebar">
-        <div className="sidebar-mix-section">
-          <MixButton
-            phase={phase}
-            canStart={canStart}
-            onStart={handleStart}
-            onStop={handleStop}
-          />
-        </div>
-        <MusicSearch disabled={isMixing} onAddToDeck={loadFile} />
-        <StatusLog entries={logEntries} />
+        {!isNarrowLayout && <StatusLog entries={logEntries} />}
       </aside>
+
     </div>
   );
 }
