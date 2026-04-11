@@ -1,0 +1,44 @@
+/* Mantine-based Wordplaylist — fills parent flex column; list scrolls inside */
+
+.playlist-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  height: 100%;
+}
+
+.playlist-panel--empty {
+  flex: 0 0 auto;
+}
+
+.playlist-panel__google-wrap {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+.playlist-panel__google-wrap > div {
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.playlist-panel__scroll {
+  flex: 1 1 0;
+  min-height: 160px;
+}
+
+.playlist-panel__scroll .mantine-ScrollArea-viewport > div {
+  display: block !important;
+}
+
+.playlist-panel__card {
+  cursor: grab;
+  flex-shrink: 0;
+}
+
+.playlist-panel__card:active {
+  cursor: grabbing;
+}

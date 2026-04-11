@@ -3,6 +3,7 @@ import type { DeckState, AutomixPhase } from '../audio/types';
 import type { WordMatch } from '../lyrics/types';
 import { MusicSearch } from './MusicSearch';
 import { MixButton } from './MixButton';
+import { WORDPLAYLIST_DRAG_MIME } from '../wordplaylistDrag';
 
 interface DeckTimelineProps {
   deck: DeckState;
@@ -14,6 +15,9 @@ interface DeckTimelineProps {
   isMixing: boolean;
   isActive: boolean;
   phase: AutomixPhase;
+  showYouTube?: boolean;
+  /** Drop a Wordplaylist row onto this deck (same as click-to-load). */
+  onWordplaylistDrop?: (itemId: string) => void;
 }
 
 interface Props {
@@ -32,6 +36,14 @@ interface Props {
   onStart: () => void;
   onStop: () => void;
   onClearDeck: (deck: 'A' | 'B') => void;
+  showYouTube?: boolean;
+  onWordplaylistDropA?: (itemId: string) => void;
+  onWordplaylistDropB?: (itemId: string) => void;
+}
+
+function dragHasLoadablePayload(e: React.DragEvent): boolean {
+  const types = Array.from(e.dataTransfer.types);
+  return types.includes(WORDPLAYLIST_DRAG_MIME) || types.includes('Files');
 }
 
 function fmtTime(sec: number): string {
@@ -45,7 +57,7 @@ const BAR_COUNT = 80;
 
 function DeckTimeline({
   deck, deckId, wordMatches, onLoadFile, onSeek, onClearDeck,
-  isMixing, isActive, phase,
+  isMixing, isActive, phase, showYouTube, onWordplaylistDrop,
 }: DeckTimelineProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
@@ -89,12 +101,31 @@ function DeckTimeline({
     return () => cancelAnimationFrame(raf);
   }, [deck.analysis?.duration, deck.currentTime]);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDeckDragOver = useCallback((e: React.DragEvent) => {
+    if (!dragHasLoadablePayload(e)) return;
     e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    e.currentTarget.classList.add('drag-over');
+  }, []);
+
+  const handleDeckDragLeave = useCallback((e: React.DragEvent) => {
     e.currentTarget.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (file) onLoadFile(file);
-  }, [onLoadFile]);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.currentTarget.classList.remove('drag-over');
+      const id = e.dataTransfer.getData(WORDPLAYLIST_DRAG_MIME);
+      if (id.trim() && onWordplaylistDrop) {
+        onWordplaylistDrop(id);
+        return;
+      }
+      const file = e.dataTransfer.files[0];
+      if (file) onLoadFile(file);
+    },
+    [onLoadFile, onWordplaylistDrop],
+  );
 
   const ratioFromPointer = useCallback((clientX: number) => {
     if (!barRef.current) return 0;
@@ -163,8 +194,8 @@ function DeckTimeline({
       <div
         className={`tl-deck tl-deck--empty tl-deck--${deckId.toLowerCase()}`}
         onDrop={handleDrop}
-        onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }}
-        onDragLeave={(e) => e.currentTarget.classList.remove('drag-over')}
+        onDragOver={handleDeckDragOver}
+        onDragLeave={handleDeckDragLeave}
       >
         <input
           ref={inputRef}
@@ -179,12 +210,14 @@ function DeckTimeline({
             <button type="button" className="tl-upload-btn" onClick={() => inputRef.current?.click()}>
               Upload your music
             </button>
-            <MusicSearch
-              variant="embedded"
-              targetDeck={deckId}
-              disabled={isMixing}
-              onAddToDeck={(_d, file) => onLoadFile(file)}
-            />
+            {showYouTube && (
+              <MusicSearch
+                variant="embedded"
+                targetDeck={deckId}
+                disabled={isMixing}
+                onAddToDeck={(_d, file) => onLoadFile(file)}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -192,7 +225,12 @@ function DeckTimeline({
   }
 
   return (
-    <div className={`tl-deck tl-deck--${deckId.toLowerCase()} ${isActive ? 'tl-deck--active' : ''} ${deck.isPlaying ? 'tl-deck--playing' : ''}`}>
+    <div
+      className={`tl-deck tl-deck--${deckId.toLowerCase()} ${isActive ? 'tl-deck--active' : ''} ${deck.isPlaying ? 'tl-deck--playing' : ''}`}
+      onDrop={handleDrop}
+      onDragOver={handleDeckDragOver}
+      onDragLeave={handleDeckDragLeave}
+    >
       {deck.isAnalyzing && (
         <div className="tl-analyzing">
           <div className="spinner" /> Analyzing...
@@ -350,7 +388,8 @@ export function TrackTimeline({
   deckA, deckB, wordMatches,
   onLoadFileA, onLoadFileB, onSeek, onClearDeck,
   phase, activeDeck, isMixing, blendProgress, transitionInfo,
-  canStart, onStart, onStop,
+  canStart, onStart, onStop, showYouTube,
+  onWordplaylistDropA, onWordplaylistDropB,
 }: Props) {
   const [merged, setMerged] = useState(false);
 
@@ -427,6 +466,8 @@ export function TrackTimeline({
                   isMixing={isMixing}
                   isActive={true}
                   phase={phase}
+                  showYouTube={showYouTube}
+                  onWordplaylistDrop={activeDeck === 'A' ? onWordplaylistDropA : onWordplaylistDropB}
                 />
               </div>
             </div>
@@ -442,6 +483,8 @@ export function TrackTimeline({
                 isMixing={isMixing}
                 isActive={isActiveA}
                 phase={phase}
+                showYouTube={showYouTube}
+                onWordplaylistDrop={onWordplaylistDropA}
               />
 
               {wordMatches.length > 0 && deckA.analysis && deckB.analysis && (
@@ -471,6 +514,8 @@ export function TrackTimeline({
                 isMixing={isMixing}
                 isActive={isActiveB}
                 phase={phase}
+                showYouTube={showYouTube}
+                onWordplaylistDrop={onWordplaylistDropB}
               />
             </div>
           )}

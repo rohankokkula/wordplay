@@ -14,6 +14,9 @@ music_cache/
 output/
 uploads/
 
+# Local file storage (playlist + community) when UPLOAD_ROOT not set
+upload_data/
+
 __pycache__/
 *.py[cod]
 .pytest_cache/

@@ -1,4 +1,7 @@
 {
   "include": ["src", "backend"],
-  "exclude": ["**/node_modules", "dist", "backend/.venv"]
+  "exclude": ["**/node_modules", "dist", "backend/.venv"],
+  "venvPath": "backend",
+  "venv": ".venv",
+  "pythonVersion": "3.14"
 }

@@ -40,11 +40,25 @@
   color: var(--text-dim, rgba(255, 255, 255, 0.55));
 }
 
+/* ── Action buttons ──────────────────────────────────────────────── */
+
+.home-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  max-width: 340px;
+}
+
 .home-enter {
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 14px 40px;
+  gap: 4px;
+  width: 100%;
+  padding: 14px 24px;
   border-radius: 12px;
   border: 1px solid rgba(167, 139, 250, 0.3);
   background: rgba(167, 139, 250, 0.08);
@@ -52,21 +66,42 @@
   -webkit-backdrop-filter: blur(12px);
   color: rgba(255, 255, 255, 0.8);
   font: inherit;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
   cursor: pointer;
   transition: all 0.25s ease-out;
   min-height: 48px;
+}
+
+.home-enter-label {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.home-enter-sub {
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.home-enter--google {
+  border-color: rgba(56, 189, 248, 0.3);
+  background: rgba(56, 189, 248, 0.06);
 }
 
 .home-enter:hover {
   color: #fff;
   border-color: rgba(167, 139, 250, 0.5);
   background: rgba(167, 139, 250, 0.15);
-  box-shadow: 0 0 30px rgba(167, 139, 250, 0.15), 0 4px 16px rgba(0,0,0,0.3);
+  box-shadow: 0 0 30px rgba(167, 139, 250, 0.15), 0 4px 16px rgba(0, 0, 0, 0.3);
   transform: translateY(-1px);
+}
+
+.home-enter--google:hover {
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(56, 189, 248, 0.12);
+  box-shadow: 0 0 30px rgba(56, 189, 248, 0.12), 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
 .home-enter:active {
@@ -76,6 +111,92 @@
 .home-enter:focus-visible {
   outline: 2px solid rgba(167, 139, 250, 0.6);
   outline-offset: 3px;
+}
+
+/* ── Google login flow ───────────────────────────────────────────── */
+
+.home-google-flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 1.25rem;
+  border-radius: 12px;
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  background: rgba(56, 189, 248, 0.04);
+  backdrop-filter: blur(12px);
+}
+
+.home-invite-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font: inherit;
+  font-size: 0.875rem;
+  letter-spacing: 0.08em;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.home-invite-input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.home-invite-input:focus {
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
+.home-google-btn-wrap {
+  display: flex;
+  justify-content: center;
+}
+
+.home-status {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.home-error {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #f87171;
+}
+
+.home-back-link {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: color 0.2s;
+}
+
+.home-back-link:hover {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* ── User bar (shown when logged in) ─────────────────────────────── */
+
+.home-user-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.home-user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
 }
 
 @media (min-width: 640px) {
@@ -88,8 +209,15 @@
     max-width: 30rem;
   }
 
+  .home-actions {
+    max-width: 380px;
+  }
+
   .home-enter {
-    padding: 16px 48px;
+    padding: 16px 28px;
+  }
+
+  .home-enter-label {
     font-size: 0.875rem;
   }
 }

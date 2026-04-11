@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import type { DeckState, AutomixPhase, LogEntry } from './audio/types';
 import {
   initMixer,
@@ -15,11 +16,21 @@ import { Visualizer } from './components/Visualizer';
 import { StatusLog } from './components/StatusLog';
 import { TrackTimeline } from './components/TrackTimeline';
 import { WordplayLogo } from './components/WordplayLogo';
+import { AppSidebarLeft } from './components/AppSidebarLeft';
+import { AppSidebarAccount } from './components/AppSidebarAccount';
+import { ExportButton } from './components/ExportButton';
 import { playDiscSfx } from './audio/turntableWindDown';
 import { useMediaQuery } from './hooks/useMediaQuery';
-import { GENRE_PRESETS, GENRE_LIST, type GenreId } from './genre/genrePresets';
+import { usePlaybackQuota } from './auth/usePlaybackQuota';
+import { useAuth } from './auth/AuthContext';
+import { apiUrl } from './apiBase';
+import { GENRE_PRESETS, type GenreId } from './genre/genrePresets';
 import { fetchSyncedLyrics, findCommonPhrases, transcribeWithWhisper } from './lyrics/lyricsService';
 import type { TimedLine, WordMatch } from './lyrics/types';
+
+const DEV_YOUTUBE_ALLOWED =
+  import.meta.env.VITE_ENABLE_YOUTUBE === 'true' &&
+  (import.meta.env.DEV || globalThis.location?.hostname === 'localhost');
 
 const INITIAL_DECK: (id: 'A' | 'B') => DeckState = (id) => ({
   id,
@@ -36,9 +47,6 @@ const INITIAL_DECK: (id: 'A' | 'B') => DeckState = (id) => ({
 
 let logIdCounter = 0;
 
-/** Crossfade length options in beats (4/4 grid from analysis). */
-const BLEND_BEAT_OPTIONS = [8, 16, 32, 64, 128] as const;
-
 function fmtTime(sec: number): string {
   if (!isFinite(sec) || sec < 0) return '0:00';
   const m = Math.floor(sec / 60);
@@ -48,6 +56,9 @@ function fmtTime(sec: number): string {
 
 export default function App() {
   const isNarrowLayout = useMediaQuery('(max-width: 800px)');
+  const { mode, user, token, logout } = useAuth();
+  const quota = usePlaybackQuota();
+  const [devYouTube, setDevYouTube] = useState(false);
   const [deckA, setDeckA] = useState<DeckState>(() => INITIAL_DECK('A'));
   const [deckB, setDeckB] = useState<DeckState>(() => INITIAL_DECK('B'));
   const [phase, setPhase] = useState<AutomixPhase>('idle');
@@ -157,11 +168,12 @@ export default function App() {
       else setDeckA((p) => (p.isPlaying ? { ...p, isPlaying: false } : p));
       if (pB?.playing) setDeckB((p) => ({ ...p, currentTime: pB.currentTime, isPlaying: true }));
       else setDeckB((p) => (p.isPlaying ? { ...p, isPlaying: false } : p));
+      quota.tick(!!(pA?.playing || pB?.playing));
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [quota.tick]);
 
   const loadFile = useCallback(async (deck: 'A' | 'B', file: File) => {
     const gen = ++loadGenRef.current[deck];
@@ -245,6 +257,30 @@ export default function App() {
       console.error(`[loadFile ${deck}]`, err);
     }
   }, [addLog]);
+
+  const loadFromWordplaylist = useCallback(
+    async (deck: 'A' | 'B', itemId: string) => {
+      if (!token) return;
+      const res = await fetch(apiUrl(`/api/playlist/${itemId}/file`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition');
+      let name = 'track.mp3';
+      if (cd) {
+        const star = /filename\*=(?:UTF-8'')?([^;\n]+)/i.exec(cd);
+        const quoted = /filename="([^"]+)"/i.exec(cd);
+        const plain = /filename=([^;\s]+)/i.exec(cd);
+        if (star?.[1]) name = decodeURIComponent(star[1].trim().replace(/^"(.*)"$/, '$1'));
+        else if (quoted?.[1]) name = quoted[1];
+        else if (plain?.[1]) name = plain[1].replace(/^"(.*)"$/, '$1');
+      }
+      const file = new File([blob], name, { type: blob.type || 'audio/mpeg' });
+      loadFile(deck, file);
+    },
+    [token, loadFile],
+  );
 
   const clearDeck = useCallback(
     (deck: 'A' | 'B') => {
@@ -345,70 +381,58 @@ export default function App() {
     p?.seek(t);
   }, [deckA, deckB]);
 
+  const showYouTube = DEV_YOUTUBE_ALLOWED && devYouTube;
+
   return (
     <div className="app-layout">
-      <aside className="app-sidebar-left" aria-label="Genre and blend length">
-        <div className="genre-panel">
-          <h2 className="genre-panel-title">GENRE STYLE</h2>
-          <p className="genre-panel-desc">
-            Shapes the rhythm, transitions, and feel of the mix.
-          </p>
-          <div className="genre-buttons">
-            {GENRE_LIST.map((gid) => {
-              const preset = GENRE_PRESETS[gid];
-              return (
-                <button
-                  key={gid}
-                  type="button"
-                  className={`genre-btn${genreStyle === gid ? ' active' : ''}`}
-                  disabled={isMixing}
-                  onClick={() => selectGenre(gid)}
-                >
-                  {preset.label}
-                </button>
-              );
-            })}
+      {quota.exceeded && (
+        <div className="quota-overlay">
+          <div className="quota-modal">
+            <h2>Free playback limit reached</h2>
+            <p>You've used your 20 minutes of free playback. Sign in with Google for unlimited access.</p>
+            <button type="button" className="quota-cta" onClick={logout}>
+              Sign in with Google
+            </button>
           </div>
         </div>
-
-        <div className="beat-panel">
-          <h2 className="beat-panel-title">BLEND LENGTH</h2>
-          <p className="beat-panel-one-liner">
-            Bigger numbers mean the two songs overlap for longer when they mix.
-          </p>
-          {beatPreview && (
-            <p className="beat-panel-meta">
-              A {Math.round(beatPreview.bpmA)} BPM
-              {' · '}
-              B <span className="deck-b">{Math.round(beatPreview.bpmB)} BPM</span>
-            </p>
-          )}
-          <div className="beat-buttons">
-            {BLEND_BEAT_OPTIONS.map((n) => {
-              const approxSec =
-                beatPreview != null ? n * beatPreview.avgInterval : null;
-              return (
-                <button
-                  key={n}
-                  type="button"
-                  className={`beat-select-btn${blendBeats === n ? ' active' : ''}`}
-                  disabled={isMixing}
-                  onClick={() => selectBlendBeats(n)}
-                >
-                  <span className="beat-select-label">{n} beats</span>
-                  {approxSec != null && (
-                    <span className="beat-select-duration">~{approxSec.toFixed(1)}s avg</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </aside>
+      )}
+      <AppSidebarLeft
+        token={token}
+        quota={{
+          isPremium: quota.isPremium,
+          remainingMinutes: quota.remainingMinutes,
+          usedSeconds: quota.usedSeconds,
+        }}
+        genreStyle={genreStyle}
+        blendBeats={blendBeats}
+        beatPreview={beatPreview}
+        isMixing={isMixing}
+        onLoadPlaylistFile={(f) => loadFile('A', f)}
+        onSelectGenre={selectGenre}
+        onSelectBlendBeats={selectBlendBeats}
+      />
 
       <div className="app-main">
         <header className="app-header">
-          <WordplayLogo className="app-header-wordplay-logo" title="Wordplay" />
+          <div className="app-header__brand">
+            <WordplayLogo className="app-header-wordplay-logo" title="Wordplay" />
+            <Link to="/wall" className="app-header__community-link">
+              Community wordplays
+            </Link>
+          </div>
+          <div className="app-header-actions">
+            <ExportButton />
+            {DEV_YOUTUBE_ALLOWED && (
+              <label className="dev-toggle" title="YouTube search/paste (dev only — localhost)">
+                <input
+                  type="checkbox"
+                  checked={devYouTube}
+                  onChange={(e) => setDevYouTube(e.target.checked)}
+                />
+                <span className="dev-toggle-label">YouTube (dev)</span>
+              </label>
+            )}
+          </div>
         </header>
 
         <div className="visualizer-section">
@@ -437,6 +461,9 @@ export default function App() {
           onStart={handleStart}
           onStop={handleStop}
           onClearDeck={clearDeck}
+          showYouTube={showYouTube}
+          onWordplaylistDropA={(id) => { void loadFromWordplaylist('A', id); }}
+          onWordplaylistDropB={(id) => { void loadFromWordplaylist('B', id); }}
         />
 
         {isNarrowLayout && (
@@ -445,7 +472,10 @@ export default function App() {
       </div>
 
       <aside className="app-sidebar">
-        {!isNarrowLayout && <StatusLog entries={logEntries} />}
+        <div className="app-sidebar__main">
+          {!isNarrowLayout && <StatusLog entries={logEntries} />}
+        </div>
+        <AppSidebarAccount user={user} onLogout={logout} />
       </aside>
 
     </div>

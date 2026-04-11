@@ -2,9 +2,13 @@
 wordplay-backend — FastAPI server.
 
 Endpoints:
-  GET  /health — liveness + optional YouTube search/load probes (see query params)
-  GET  /api/music/search — YouTube search
-  POST /api/music/download — download audio from a YouTube URL
+  GET  /health
+  POST /api/auth/google — Google ID-token login + invite code
+  GET  /api/auth/me — current user from JWT
+  GET  /api/music/search — YouTube search (gated by ALLOW_YOUTUBE_API)
+  POST /api/music/download — download audio from a YouTube URL (gated)
+  /api/playlist/* — per-user playlist CRUD (auth required)
+  /api/community/* — wordplay wall publish/feed/stream
   GET  /api/lyrics/search — proxy to LRCLib for synced lyrics
   GET  /api/lyrics/get — proxy to LRCLib exact lookup
   POST /api/lyrics/transcribe — Whisper transcription of uploaded audio
@@ -18,18 +22,25 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 import asyncio
 import logging
+import os
 import tempfile
 
 import httpx
 from pydantic import BaseModel, Field
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Depends
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from music_fetch import download_youtube_audio, health_check_payload, search_youtube
+from auth import GoogleLoginRequest, google_login, get_current_user
+from db import init_db
+from playlist import router as playlist_router
+from community import router as community_router
 
 logger = logging.getLogger("wordplay")
+
+ALLOW_YOUTUBE_API = os.environ.get("ALLOW_YOUTUBE_API", "false").strip().lower() in ("1", "true", "yes")
 
 app = FastAPI(title="wordplay-backend")
 
@@ -39,6 +50,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(playlist_router)
+app.include_router(community_router)
+
+
+@app.on_event("startup")
+async def _startup():
+    await init_db()
 
 LRCLIB_BASE = "https://lrclib.net/api"
 LRCLIB_HEADERS = {"User-Agent": "Wordplay/1.0 (https://github.com/wordplay-app)"}
@@ -74,8 +93,33 @@ async def health(
     return await asyncio.to_thread(health_check_payload, force)
 
 
+# ── Auth ──────────────────────────────────────────────────────────────
+
+@app.post("/api/auth/google")
+async def auth_google(body: GoogleLoginRequest):
+    return await google_login(body)
+
+
+@app.get("/api/auth/me")
+async def auth_me(user: dict = Depends(get_current_user)):
+    return {
+        "id": user["sub"],
+        "email": user.get("email"),
+        "name": user.get("name"),
+        "picture": user.get("picture"),
+        "tier": user.get("tier"),
+    }
+
+
+# ── YouTube music (gated) ────────────────────────────────────────────
+
 class MusicDownloadBody(BaseModel):
     url: str = Field(..., min_length=10, max_length=2048)
+
+
+def _check_youtube_gate():
+    if not ALLOW_YOUTUBE_API:
+        raise HTTPException(403, "YouTube API is disabled on this server")
 
 
 @app.get("/api/music/search")
@@ -84,6 +128,7 @@ async def music_search(
     limit: int = Query(8, ge=1, le=15),
 ):
     """Search YouTube for tracks."""
+    _check_youtube_gate()
     q = q.strip()
     if len(q) < 2:
         return {"results": []}
@@ -97,6 +142,7 @@ async def music_search(
 @app.post("/api/music/download")
 async def music_download(body: MusicDownloadBody):
     """Download audio from a YouTube URL and return the file."""
+    _check_youtube_gate()
     try:
         path, safe_name = await asyncio.to_thread(download_youtube_audio, body.url)
     except ValueError as e:
