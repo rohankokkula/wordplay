@@ -12,6 +12,7 @@ Download strategy:
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import uuid
@@ -24,7 +25,23 @@ from youtubesearchpython import StreamURLFetcher, Video, VideosSearch
 
 logger = logging.getLogger(__name__)
 
-MUSIC_DIR = Path(__file__).resolve().parent / "music_cache"
+
+def _resolve_music_dir() -> Path:
+    """
+    Writable directory for downloaded audio.
+
+    Vercel serverless (and similar) only allow writes under /tmp; the deploy
+    tree at /var/task is read-only, so a sibling ``music_cache/`` would fail at import.
+    """
+    override = os.environ.get("MUSIC_CACHE_DIR", "").strip()
+    if override:
+        return Path(override)
+    if os.environ.get("VERCEL") == "1":
+        return Path(os.environ.get("TMPDIR", "/tmp")) / "wordplay_music_cache"
+    return Path(__file__).resolve().parent / "music_cache"
+
+
+MUSIC_DIR = _resolve_music_dir()
 MUSIC_DIR.mkdir(parents=True, exist_ok=True)
 
 _SAFE_NAME = re.compile(r"[^a-zA-Z0-9._\- ()\[\]]+")

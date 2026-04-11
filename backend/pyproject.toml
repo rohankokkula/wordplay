@@ -1,0 +1,9 @@
+# Helps Vercel resolve the FastAPI app when the entry file is main.py
+# https://vercel.com/docs/frameworks/backend/fastapi
+[project]
+name = "wordplay-backend"
+version = "0"
+requires-python = ">=3.11"
+
+[project.scripts]
+app = "main:app"
