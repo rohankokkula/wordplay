@@ -4,11 +4,6 @@
     "frontend": {
       "framework": "vite",
       "routePrefix": "/"
-    },
-    "backend": {
-      "framework": "fastapi",
-      "entrypoint": "backend/main.py",
-      "routePrefix": "/_/backend"
     }
   }
 }

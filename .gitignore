@@ -17,6 +17,8 @@ pnpm-debug.log*
 # ── Environment & secrets ─────────────────────────────────────────────
 .env
 .env.*
+!.env.example
+!.env.production
 *.local
 backend/.env
 backend/cookies.txt
