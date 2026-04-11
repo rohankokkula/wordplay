@@ -14,7 +14,53 @@ type SearchHit = {
   title: string;
   duration: number | null;
   url: string;
+  thumbnail?: string;
 };
+
+/** If the field looks like a YouTube watch/embed/short URL, return canonical watch URL + id. */
+function parseYouTubePaste(raw: string): { id: string; url: string } | null {
+  let t = raw.trim();
+  if (t.length < 12) return null;
+  if (!/^https?:\/\//i.test(t)) {
+    t = `https://${t}`;
+  }
+  let url: URL;
+  try {
+    url = new URL(t);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.replace(/^www\./, '').toLowerCase();
+
+  const idOk = (id: string) => /^[a-zA-Z0-9_-]{11}$/.test(id);
+
+  if (host === 'youtu.be') {
+    const id = url.pathname.replace(/^\//, '').split('/')[0] ?? '';
+    if (idOk(id)) {
+      return { id, url: `https://www.youtube.com/watch?v=${id}` };
+    }
+    return null;
+  }
+
+  if (!host.endsWith('youtube.com')) return null;
+
+  if (url.pathname === '/watch' || url.pathname.startsWith('/watch')) {
+    const v = url.searchParams.get('v');
+    if (v && idOk(v)) {
+      return { id: v, url: `https://www.youtube.com/watch?v=${v}` };
+    }
+  }
+
+  const pathMatch = url.pathname.match(
+    /\/(?:embed|shorts|live|v)\/([a-zA-Z0-9_-]{11})/,
+  );
+  if (pathMatch && idOk(pathMatch[1])) {
+    const id = pathMatch[1];
+    return { id, url: `https://www.youtube.com/watch?v=${id}` };
+  }
+
+  return null;
+}
 
 function fmtDur(sec: number | null): string {
   if (sec == null || !isFinite(sec) || sec < 0) return '';
@@ -114,6 +160,22 @@ export function MusicSearch({
       setSearchError(variant === 'embedded' ? '' : 'Type at least 2 characters');
       return;
     }
+
+    const yt = parseYouTubePaste(q);
+    if (yt) {
+      setSearchError('');
+      setResults([
+        {
+          id: yt.id,
+          title: 'YouTube link (paste)',
+          duration: null,
+          url: yt.url,
+          thumbnail: `https://img.youtube.com/vi/${yt.id}/mqdefault.jpg`,
+        },
+      ]);
+      return;
+    }
+
     setSearching(true);
     setSearchError('');
     try {
@@ -231,7 +293,9 @@ export function MusicSearch({
         onAddToDeck(deck, file);
       } catch (e) {
         setSearchError(
-          e instanceof Error ? e.message : 'Download failed — check ffmpeg and yt-dlp on the server',
+          e instanceof Error
+            ? e.message
+            : 'Download failed — check the API is running and reachable',
         );
       } finally {
         setDownloadingKey(null);
@@ -255,9 +319,9 @@ export function MusicSearch({
         <input
           type="search"
           className="music-search-input"
-          placeholder="Search…"
+          placeholder="Search or paste YouTube link…"
           autoComplete="off"
-          aria-label="Search YouTube"
+          aria-label="Search YouTube or paste a video URL"
           value={query}
           disabled={disabled || searching}
           onChange={(e) => setQuery(e.target.value)}
