@@ -1,5 +1,9 @@
 .venv/
 
+# Editor / OS
+.idea/
+.DS_Store
+
 # Local Netscape cookies — never commit (use YT_DLP_COOKIES_FILE or YT_DLP_COOKIES_B64)
 cookies.txt
 

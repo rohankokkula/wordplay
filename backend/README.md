@@ -17,15 +17,16 @@ pip install -r requirements.txt
 
 ## Run locally
 
-Optional: create `backend/.env` (gitignored) with **`YT_DLP_COOKIES_B64`** = base64 of your Netscape `cookies.txt` (one line, no quotes):
+Optional: create `.env` in this directory (gitignored) with **`YT_DLP_COOKIES_B64`** = base64 of your Netscape `cookies.txt` (one line, no quotes):
 
 ```bash
-cd backend && base64 -i cookies.txt | tr -d '\n'   # paste output into .env as YT_DLP_COOKIES_B64=...
+base64 -i cookies.txt | tr -d '\n'   # paste output into .env as YT_DLP_COOKIES_B64=...
 ```
 
 Or set **`YT_DLP_COOKIES_FILE`** to an absolute path to `cookies.txt`. `main.py` loads `.env` via `python-dotenv`.
 
 ```bash
+cd backend   # repo root if this folder is the only content
 uvicorn main:app --reload --port 8000
 ```
 
@@ -58,13 +59,10 @@ If HTTPS fails with certificate errors, prefer pointing Python at your CA bundle
 export SSL_CERT_FILE=/path/to/ca-bundle.pem
 ```
 
-**Development only:** `SOBEROHAN_INSECURE_SSL=1` disables verification (see `ssl_compat.py`). Do not use in production.
+**Development only:** `SOBEROHAN_INSECURE_SSL=1` disables verification if you add that hook. Do not use in production.
 
 ## Deploy notes
 
-- **Render (Web Service):** use a start command that binds **all interfaces** and **Render’s `PORT`** — not the local dev command. Example:  
-  `uvicorn main:app --host 0.0.0.0 --port $PORT`  
-  Do **not** use `--reload` or `--port 8000` in production; Render probes `0.0.0.0` and will stay “in progress” if the app only listens on `127.0.0.1`. Set **Root Directory** to `backend` if the repo root is the monorepo. See `render.yaml` in the repo root.
-- Hosts like Render need **ffmpeg** available in the runtime; native Python stacks may not include it unless you add a build step or use an image that has it.
-- **YouTube bot checks** on cloud IPs: use a Netscape `cookies.txt` from a signed-in browser (see yt-dlp wiki). Either **`YT_DLP_COOKIES_FILE=/path/to/cookies.txt`** or **`YT_DLP_COOKIES_B64`** (base64 of the whole file — avoids multiline shell issues on Railway). **`GET /health`** returns **`youtube_cookies: true/false`** so you can confirm the app sees a cookie source.
+- Bind **all interfaces** and the platform **`PORT`**, e.g. `uvicorn main:app --host 0.0.0.0 --port $PORT`. Do not use `--reload` in production.
+- **YouTube bot checks** on cloud IPs: use a Netscape `cookies.txt` from a signed-in browser (see yt-dlp wiki). Either **`YT_DLP_COOKIES_FILE`** or **`YT_DLP_COOKIES_B64`** (base64 of the whole file).
 - Long YouTube downloads may exceed serverless timeouts — use a VM or web service with a generous request limit.
