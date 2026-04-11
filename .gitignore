@@ -27,6 +27,12 @@ dist-ssr
 # Secrets & credentials
 .env
 .env.*
+
+# Leftover backend dir when switching branches (API lives on branch `backend`)
+backend/.venv
+backend/__pycache__
+backend/music_cache
+backend/.env
 *.local
 
 # Python
