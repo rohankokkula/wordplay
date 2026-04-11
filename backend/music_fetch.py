@@ -6,9 +6,10 @@ Search: yt-search-python — VideosSearch (no cookies).
 Download strategy:
 1) Prefer Video + StreamURLFetcher + httpx when innertube returns stream manifests.
    Stream downloads use browser-like headers so googlevideo URLs work from datacenter IPs.
-2) Fall back to yt-dlp with rotating YouTube *player_client* values (android, ios, mweb, …).
-   Railway/Vercel IPs often hit “Sign in to confirm you’re not a bot” on the default *web* client;
-   mobile/TV clients usually still work without cookies (same as local dev).
+2) Fall back to yt-dlp: try **built-in default clients** first (recent yt-dlp prefers
+   ``android_sdkless`` / ``tv`` on server IPs), then explicit fallbacks. Optional
+   ``YTDLP_COOKIEFILE`` env points at a cookie file on the server (not committed) if YouTube
+   still blocks the datacenter IP.
 """
 
 from __future__ import annotations
@@ -88,12 +89,27 @@ def _is_youtube_format_not_available(message: str) -> bool:
 _YTDLP_FORMAT = "bestaudio/best/worst"
 
 
-def _yt_dlp_youtube_extractor_arg_attempts() -> list[dict]:
+def _apply_optional_ytdlp_cookiefile(opts: dict) -> None:
+    """Optional: set ``YTDLP_COOKIEFILE=/path/to/cookies.txt`` on the host if bot walls persist."""
+    p = os.environ.get("YTDLP_COOKIEFILE", "").strip()
+    if p and Path(p).is_file():
+        opts["cookiefile"] = p
+
+
+def _yt_dlp_youtube_extractor_arg_attempts() -> list[dict | None]:
     """
-    Order matters: datacenter-friendly clients first; plain `web` last.
-    Each value is merged into yt-dlp `extractor_args`.
+    Each entry is ``extractor_args`` for yt-dlp, or ``None`` = **omit** the key so yt-dlp
+    uses its **current built-in default** client order (changes with releases; includes
+    ``android_sdkless`` / ``tv`` on recent builds — important for datacenter IPs).
+
+    Then we try explicit clients. See: https://github.com/yt-dlp/yt-dlp/issues/16225
     """
     return [
+        None,
+        {"youtube": {"player_client": ["android_sdkless"]}},
+        {"youtube": {"player_client": ["android_sdkless", "tv"]}},
+        {"youtube": {"player_client": ["tv"]}},
+        {"youtube": {"player_client": ["web_safari"]}},
         {"youtube": {"player_client": ["android"]}},
         {"youtube": {"player_client": ["ios"]}},
         {"youtube": {"player_client": ["mweb"]}},
@@ -264,8 +280,10 @@ def _download_via_ytdlp(url: str) -> tuple[Path, str]:
                 "no_warnings": True,
                 "no_color": True,
                 "noplaylist": True,
-                "extractor_args": extractor_args,
             }
+            if extractor_args is not None:
+                ydl_opts["extractor_args"] = extractor_args
+            _apply_optional_ytdlp_cookiefile(ydl_opts)
             if ffmpeg_dir:
                 ydl_opts["ffmpeg_location"] = ffmpeg_dir
 
@@ -335,7 +353,9 @@ def _download_via_ytdlp(url: str) -> tuple[Path, str]:
             return path, safe
 
     msg = str(last_err) if last_err else "unknown error"
-    raise RuntimeError(f"{msg}\nInstall ffmpeg if transcoding failed.")
+    if _is_youtube_bot_challenge(msg):
+        raise RuntimeError(msg)
+    raise RuntimeError(f"{msg}\nInstall ffmpeg if transcoding failed.") from last_err
 
 
 def download_youtube_audio(url: str) -> tuple[Path, str]:
@@ -442,8 +462,10 @@ def _health_ytdlp_extract_probe(url: str) -> tuple[bool, str | None]:
             "noplaylist": True,
             "skip_download": True,
             "format": _YTDLP_FORMAT,
-            "extractor_args": extractor_args,
         }
+        if extractor_args is not None:
+            ydl_opts["extractor_args"] = extractor_args
+        _apply_optional_ytdlp_cookiefile(ydl_opts)
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(u, download=False)
