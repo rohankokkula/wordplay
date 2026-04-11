@@ -5,9 +5,9 @@ FastAPI service for YouTube search, audio download, LRCLib lyrics proxy, and Whi
 ## Stack (production-friendly default)
 
 - **Search:** [yt-search-python](https://pypi.org/project/yt-search-python/) (`VideosSearch`) — no API key, **no cookies**.
-- **Download:** `Video` + `StreamURLFetcher` + **httpx**. `yt-dlp` is installed because `StreamURLFetcher` uses it **only** for signature / `n` decipher inside the library — **not** for cookie-based extraction.
+- **Download:** Try **innertube** streams (`Video` + `StreamURLFetcher` + **httpx**) when YouTube returns `streamingData`. Often innertube returns **no** formats; then the server **falls back to [yt-dlp](https://github.com/yt-dlp/yt-dlp)** to fetch audio (`bestaudio/best`). That path is what keeps production working when the lightweight API stops exposing streams.
 
-You do **not** need `YT_DLP_COOKIES_*` for normal operation. Add cookies only if a specific host IP is still blocked by YouTube (advanced).
+You do **not** need `YT_DLP_COOKIES_*` for normal operation. If a cloud IP is still blocked, advanced cookie setups apply only to yt-dlp, not to search.
 
 ## Requirements
 
@@ -15,8 +15,7 @@ You do **not** need `YT_DLP_COOKIES_*` for normal operation. Add cookies only if
 |---|---|---|
 | Python | 3.11+ | 3.12 recommended |
 | pip | latest | `pip install --upgrade pip` |
-
-`ffmpeg` is optional for this API path (no FFmpeg extract step in the default download pipeline).
+| ffmpeg | recommended | Used by yt-dlp fallback for MP3 extraction (`FFmpegExtractAudio`). Without it, yt-dlp may still save raw `m4a`/`webm`. |
 
 ## Quick Start
 
