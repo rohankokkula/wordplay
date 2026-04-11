@@ -77,6 +77,17 @@ def _is_youtube_bot_challenge(message: str) -> bool:
     return ("sign in" in m and "bot" in m) or "not a bot" in m
 
 
+def _is_youtube_format_not_available(message: str) -> bool:
+    """YouTube often exposes different format lists per player_client — retry other clients."""
+    m = message.lower()
+    return "requested format is not available" in m or "format is not available" in m
+
+
+# Audio-only first, then any muxed stream, then worst — `bestaudio/best` alone often errors with
+# “Requested format is not available” when that client exposes no separate audio format.
+_YTDLP_FORMAT = "bestaudio/best/worst"
+
+
 def _yt_dlp_youtube_extractor_arg_attempts() -> list[dict]:
     """
     Order matters: datacenter-friendly clients first; plain `web` last.
@@ -259,14 +270,14 @@ def _download_via_ytdlp(url: str) -> tuple[Path, str]:
                 ydl_opts["ffmpeg_location"] = ffmpeg_dir
 
             if use_postprocessor:
-                ydl_opts["format"] = "bestaudio/best"
+                ydl_opts["format"] = _YTDLP_FORMAT
                 ydl_opts["postprocessors"] = [{
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
                     "preferredquality": "192",
                 }]
             else:
-                ydl_opts["format"] = "bestaudio/best"
+                ydl_opts["format"] = _YTDLP_FORMAT
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -285,6 +296,13 @@ def _download_via_ytdlp(url: str) -> tuple[Path, str]:
                             pass
                     continue
                 if _is_youtube_bot_challenge(str(e)):
+                    for p in MUSIC_DIR.glob(f"{token}.*"):
+                        try:
+                            p.unlink()
+                        except OSError:
+                            pass
+                    break
+                if _is_youtube_format_not_available(str(e)):
                     for p in MUSIC_DIR.glob(f"{token}.*"):
                         try:
                             p.unlink()
@@ -423,7 +441,7 @@ def _health_ytdlp_extract_probe(url: str) -> tuple[bool, str | None]:
             "no_color": True,
             "noplaylist": True,
             "skip_download": True,
-            "format": "bestaudio/best",
+            "format": _YTDLP_FORMAT,
             "extractor_args": extractor_args,
         }
         try:
