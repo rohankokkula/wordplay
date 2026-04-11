@@ -1,0 +1,5 @@
+# Use with Railway service Root Directory = `backend` (monorepo).
+# See backend/README.md → “Railway: 404 on /api/auth/google”.
+
+[deploy]
+startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"

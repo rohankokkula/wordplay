@@ -64,14 +64,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loginWithGoogle = useCallback(async (idToken: string, inviteCode: string) => {
-    const res = await fetch(apiUrl('/api/auth/google'), {
+    const url = apiUrl('/api/auth/google');
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id_token: idToken, invite_code: inviteCode }),
     });
     if (!res.ok) {
-      const body = await res.json().catch(() => ({ detail: 'Login failed' }));
-      throw new Error(body.detail || 'Login failed');
+      let message = 'Login failed';
+      try {
+        const body = await res.json();
+        const d = body?.detail;
+        if (typeof d === 'string') message = d;
+        else if (Array.isArray(d) && d[0]?.msg) message = d.map((x: { msg: string }) => x.msg).join('; ');
+      } catch {
+        /* ignore */
+      }
+      // Relative /api/* on Vercel has no backend → 404 "Not Found"
+      if (res.status === 404 || message === 'Not Found') {
+        throw new Error(
+          'API returned 404 — the app is not calling your Railway backend. In Vercel → Settings → Environment Variables, set VITE_API_BASE to your API origin (e.g. https://your-service.up.railway.app) with no trailing slash, then redeploy.',
+        );
+      }
+      throw new Error(message);
     }
     const data = await res.json();
     setToken(data.access_token);

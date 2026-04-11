@@ -67,6 +67,12 @@ def _lrc_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=10)
 
 
+@app.get("/api/ping")
+async def api_ping():
+    """Use this to confirm the deployed service is this FastAPI app (`GET` returns JSON). If this 404s, Railway is running the wrong build or root directory."""
+    return {"service": "wordplay-backend", "ok": True}
+
+
 @app.get("/health")
 async def health(
     quick: bool = Query(

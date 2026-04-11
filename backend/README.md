@@ -32,6 +32,26 @@ uvicorn main:app --reload --port 8000
 
 Health: `GET http://localhost:8000/health?quick=1`
 
+## Railway: `404` on `/api/auth/google` (production)
+
+The route exists in this app (`POST /api/auth/google`). A **404 from your Railway URL** almost always means **the wrong app** is running (or an old deploy), not a missing FastAPI route.
+
+**Monorepo (frontend at repo root + `backend/`):**
+
+1. In Railway → **your API service** → **Settings** → **Root Directory**, set **`backend`** (the folder that contains `main.py` and `requirements.txt`).
+2. **Start command:** `uvicorn main:app --host 0.0.0.0 --port $PORT` (or rely on `backend/railway.toml`).
+3. **Redeploy** (Deployments → Deploy latest).
+
+**Sanity checks** (after deploy):
+
+- `GET https://<your-railway-host>/api/ping` → `200` + `{"service":"wordplay-backend","ok":true}`  
+- `GET https://<your-railway-host>/health?quick=1` → `200` + JSON  
+- `GET https://<your-railway-host>/docs` → Swagger UI with **`POST /api/auth/google`** listed  
+
+If **`/api/ping` or `/docs` is 404**, the running container is **not** this backend (wrong **GitHub repo/branch**, **root directory**, or **deploy never picked up latest commit** — push `main` and redeploy).
+
+If `/api/ping` works but **`POST /api/auth/google`** still 404, you are on a **stale image**: trigger a **fresh deploy** after pushing.
+
 ## API Endpoints
 
 | Method | Path | Auth | Description |
