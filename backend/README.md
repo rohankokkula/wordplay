@@ -9,6 +9,8 @@ FastAPI service for YouTube search and audio download used by the Wordplay web a
 
 ## Install
 
+From the `backend/` directory (this folder in the repo):
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
@@ -26,7 +28,6 @@ base64 -i cookies.txt | tr -d '\n'   # paste output into .env as YT_DLP_COOKIES_
 Or set **`YT_DLP_COOKIES_FILE`** to an absolute path to `cookies.txt`. `main.py` loads `.env` via `python-dotenv`.
 
 ```bash
-cd backend   # repo root if this folder is the only content
 uvicorn main:app --reload --port 8000
 ```
 
