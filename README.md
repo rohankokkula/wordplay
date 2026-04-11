@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="public/wordplay-logo-source.svg" />
-    <source media="(prefers-color-scheme: light)" srcset="public/wordplay-logo-source.svg" />
-    <img src="public/wordplay-logo-source.svg" alt="Wordplay" width="420" />
+    <source media="(prefers-color-scheme: dark)" srcset="public/wordplay-logo-animated.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="public/wordplay-logo-animated.svg" />
+    <img src="public/wordplay-logo-animated.svg" alt="Wordplay" width="420" />
   </picture>
 </p>
 
@@ -26,7 +26,7 @@
   <img src="https://img.shields.io/badge/vite-8-646CFF?logo=vite&logoColor=white" alt="Vite 8" />
   <img src="https://img.shields.io/badge/Web_Audio_API-black?logo=googlechrome&logoColor=white" alt="Web Audio API" />
   <img src="https://img.shields.io/badge/fastapi-0.135-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/yt--search--python-2.0-FF0000?logo=youtube&logoColor=white" alt="yt-search-python" />
+  <img src="https://img.shields.io/badge/yt--dlp-2026-red?logo=youtube&logoColor=white" alt="yt-dlp" />
   <img src="https://img.shields.io/badge/whisper-base-blueviolet" alt="Whisper" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
 </p>
@@ -54,7 +54,7 @@ Two decks, crossfades, and YouTube search — entirely in your browser.
 | **Lyric-Aware Transitions** | Fetches synced lyrics from LRCLib; falls back to on-device Whisper transcription; finds common phrases and schedules the crossfade at the wordplay hook |
 | **Genre Styles** | 10+ presets (neutral, hip-hop, EDM, lo-fi, D&B, reggaeton, house, techno, trance, afrobeat, bollytech) shape beat layers, transition curves, and FX character |
 | **Visualizer** | Butterchurn (Milkdrop WebGL) reactive visualizer with 14 curated presets auto-cycling every 25 seconds |
-| **YouTube Search & Download** | Search via [yt-search-python](https://pypi.org/project/yt-search-python/); download resolves streams in the API (httpx) with yt-dlp used only for signature decipher inside the library |
+| **YouTube Search & Download** | Search YouTube from the deck, download audio via yt-dlp, and load it straight into the player |
 | **Configurable Crossfade** | 8, 16, 32, 64, or 128-beat blend lengths with real-time duration preview |
 | **DJ SFX** | Air horn, siren, vinyl brake, snare roll, turntable wind-down — triggered automatically during transitions |
 | **Responsive Layout** | Three-column desktop grid collapses to a single column on mobile |
@@ -288,7 +288,7 @@ The visualizer runs in its own `requestAnimationFrame` loop, independent of the 
 |---|---|---|
 | **Node.js** | 18+ | Frontend dev server and build |
 | **Python** | 3.11+ | Backend API server |
-| **ffmpeg** | optional | Not required for the default download path; install if you add transcoding or other ffmpeg-dependent tooling |
+| **ffmpeg** | any | Audio transcoding (yt-dlp post-processing) |
 
 ```bash
 # macOS
@@ -301,8 +301,8 @@ sudo apt install nodejs npm python3 python3-venv ffmpeg
 ### 1. Clone
 
 ```bash
-git clone https://github.com/rohankokkula/wordplay.git
-cd wordplay
+git clone https://github.com/rohankokkula/wordplay-render.git
+cd wordplay-render
 ```
 
 ### 2. Frontend
@@ -319,7 +319,7 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-# Optional: create .env in this folder for YouTube cookies on cloud IPs — see backend/README.md
+cp .env.example .env        # edit if you need YouTube cookies
 uvicorn main:app --reload --port 8000
 ```
 
@@ -331,10 +331,8 @@ Open **http://localhost:5173**, load two tracks, and hit **start**.
 
 ## Architecture
 
-Layout for **this** repository (full-stack `final` branch). The deep-dive sections above describe the engine design; some optional modules (e.g. separate DJ SFX / genre layer files) may be inlined or vary by release.
-
 ```
-wordplay/
+wordplay-render/
 ├── src/                          # React + TypeScript frontend
 │   ├── main.tsx                  # Entry — BrowserRouter, single route
 │   ├── App.tsx                   # Main DJ deck UI, automix wiring, load pipeline
@@ -346,22 +344,25 @@ wordplay/
 │   ├── audio/
 │   │   ├── mixer.ts              # Web Audio graph: EQ, crossfader, FX chain, master
 │   │   ├── deckPlayer.ts         # Per-deck BufferSource playback, seek, volume
-│   │   ├── effects.ts            # FX chain: filters, reverb, EQ, sub boost
+│   │   ├── effects.ts            # FX chain: filters, reverb, genre EQ, sub boost
 │   │   ├── vocalFX.ts            # Analysis-driven reverb throws and cue slices
+│   │   ├── djSfx.ts              # Synthesized air horn, siren, vinyl brake, snare roll
+│   │   ├── genreBeatLayer.ts     # Synthesized drum machine on beat grid
+│   │   ├── genreInstrumental.ts  # Looping instrumental bed from YouTube
 │   │   ├── turntableWindDown.ts  # One-shot disc SFX
 │   │   └── types.ts              # TrackAnalysis, DeckState, AutomixPhase types
 │   ├── automix/
-│   │   ├── controller.ts         # Automix FSM, transition execution
+│   │   ├── controller.ts         # 4-state automix FSM, transition execution
 │   │   └── transitionPlan.ts     # Strategy ranking, phrase quantization, cue selection
 │   ├── components/
 │   │   ├── Visualizer.tsx        # Butterchurn WebGL + preset rotation
 │   │   ├── TrackTimeline.tsx     # Dual-deck waveform, seek, wordplay markers
 │   │   ├── MusicSearch.tsx       # YouTube search with streaming download + progress
-│   │   ├── DeckCard.tsx          # Deck UI card
 │   │   ├── MixButton.tsx         # Start/stop with animated disc
 │   │   ├── StatusLog.tsx         # Timestamped event log
-│   │   ├── WordplayLogo.tsx      # SVG wordmark + spinning disc
-│   │   └── …                     # odCompactDisc, wordplay logo CSS/data helpers
+│   │   └── WordplayLogo.tsx      # SVG wordmark with spinning disc
+│   ├── genre/
+│   │   └── genrePresets.ts       # 10+ genre definitions (patterns, tuning, FX params)
 │   ├── lyrics/
 │   │   ├── lyricsService.ts      # LRCLib client, Whisper upload, phrase matching
 │   │   ├── lyricSync.ts          # Binary search for active lyric line
@@ -369,11 +370,12 @@ wordplay/
 │   ├── hooks/
 │   │   └── useMediaQuery.ts      # Responsive breakpoint hook
 │   └── pages/
-│       ├── HomePage.tsx          # Landing → App transition
+│       ├── HomePage.tsx           # Landing → App transition
 │       └── home.css
 ├── backend/
-│   ├── main.py                   # FastAPI: search, download, lyrics, Whisper
-│   └── music_fetch.py            # yt-search-python (Video + StreamURLFetcher) + httpx; SSRF-safe URL checks
+│   ├── main.py                   # FastAPI: search, download, lyrics, Whisper, genre cache
+│   ├── music_fetch.py            # yt-dlp integration, cookie handling, SSRF protection
+│   └── ssl_compat.py             # TLS helpers for corporate proxies
 ├── public/                       # Static assets (favicon, logos)
 ├── vite.config.ts                # Vite + React plugin, /api proxy to :8000
 └── package.json
@@ -419,7 +421,15 @@ wordplay/
 
 ### Backend
 
-No env vars are required for a basic deploy. Optional variables (cookies, TLS, ffmpeg paths) are documented in [`backend/README.md`](backend/README.md).
+See [`backend/.env.example`](backend/.env.example) for all options. Key variables:
+
+| Variable | Description |
+|---|---|
+| `YT_DLP_COOKIES_FILE` | Path to Netscape `cookies.txt` for YouTube authentication |
+| `YT_DLP_COOKIES_B64` | Base64 of `cookies.txt` (one line, no quotes — cloud-friendly) |
+| `YT_DLP_COOKIES_FROM_BROWSER` | Browser name (`chrome`, `firefox`, etc.) for local dev |
+| `FFMPEG_LOCATION` | Directory containing `ffmpeg` + `ffprobe` (auto-detected if on PATH) |
+| `SOBEROHAN_INSECURE_SSL` | `1` to skip TLS verification (dev only, never in production) |
 
 ---
 
@@ -435,7 +445,7 @@ No env vars are required for a basic deploy. Optional variables (cookies, TLS, f
 uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
-4. Optional: set `YT_DLP_COOKIES_B64` or related vars for YouTube on cloud IPs — see [`backend/README.md`](backend/README.md)
+4. Add environment variables (see [backend/.env.example](backend/.env.example)) — especially `YT_DLP_COOKIES_B64` for YouTube auth on cloud IPs
 5. Railway auto-detects Python and installs `requirements.txt`
 
 ### Frontend — Vercel / Netlify / any static host
@@ -448,7 +458,7 @@ Set `VITE_API_BASE` to your deployed backend URL at build time, e.g. `https://wo
 
 ### YouTube cookies on cloud
 
-Cloud IPs are frequently challenged by YouTube. Export Netscape cookies from a logged-in browser session and set `YT_DLP_COOKIES_B64` (or `YT_DLP_COOKIES_FILE`) as a Railway environment variable — details in [`backend/README.md`](backend/README.md). `GET /health` returns `{"status":"ok"}` for a simple liveness check.
+Cloud IPs are frequently challenged by YouTube. Export Netscape cookies from a logged-in browser session and set `YT_DLP_COOKIES_B64` as a Railway environment variable. Check `GET /health` — it reports `youtube_cookies: true/false` so you can confirm.
 
 ---
 
@@ -460,7 +470,7 @@ Cloud IPs are frequently challenged by YouTube. Export Netscape cookies from a l
 | **Audio Engine** | Web Audio API (AnalyserNode, BiquadFilter, ConvolverNode, AudioBufferSource, GainNode, OscillatorNode) |
 | **Visualizer** | Butterchurn (Milkdrop WebGL) |
 | **Backend** | FastAPI, Python 3.12 |
-| **YouTube** | [yt-search-python](https://pypi.org/project/yt-search-python/), httpx; yt-dlp present for signature decipher in `StreamURLFetcher` |
+| **YouTube** | yt-dlp |
 | **Transcription** | faster-whisper (CTranslate2 INT8) |
 | **Lyrics** | LRCLib API |
 | **Deployment** | Railway (backend), any static host (frontend) |
@@ -469,13 +479,13 @@ Cloud IPs are frequently challenged by YouTube. Export Netscape cookies from a l
 
 ## Contributing
 
-Contributions are welcome — open an issue or pull request on GitHub.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
 ## License
 
-MIT — Rohan Kokkula
+[MIT](LICENSE) — Rohan Kokkula
 
 ---
 

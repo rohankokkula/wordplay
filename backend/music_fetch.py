@@ -30,14 +30,143 @@ _SAFE_NAME = re.compile(r"[^a-zA-Z0-9._\- ()\[\]]+")
 
 _stream_fetcher: StreamURLFetcher | None = None
 
+def _ffmpeg_bin_dir() -> str | None:
+    """Directory passed to yt-dlp as ffmpeg_location (must contain ffmpeg + ffprobe)."""
+    env = os.environ.get("FFMPEG_LOCATION", "").strip()
+    if env:
+        p = Path(env)
+        if p.is_file():
+            return str(p.parent)
+        if p.is_dir() and (p / "ffmpeg").exists():
+            return str(p)
+    which = shutil.which("ffmpeg")
+    if which:
+        return str(Path(which).resolve().parent)
+    for d in ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"):
+        if (Path(d) / "ffmpeg").exists():
+            return d
+    return None
 
-def _get_stream_fetcher() -> StreamURLFetcher:
-    """Library recommends a single StreamURLFetcher instance."""
-    global _stream_fetcher
-    if _stream_fetcher is None:
-        _stream_fetcher = StreamURLFetcher()
-    return _stream_fetcher
 
+# Cached path after materializing YT_DLP_COOKIES_B64 (avoid rewriting every request).
+_b64_cookie_path: str | None = None
+# True after a failed decode when YT_DLP_COOKIES_B64 was non-empty (for /health).
+_b64_decode_failed: bool = False
+
+
+def _materialize_cookies_from_b64() -> str | None:
+    """Decode YT_DLP_COOKIES_B64 into music_cache/.youtube_cookies.txt."""
+    global _b64_cookie_path, _b64_decode_failed
+    if _b64_cookie_path and Path(_b64_cookie_path).is_file():
+        return _b64_cookie_path
+    raw = os.environ.get("YT_DLP_COOKIES_B64", "").strip()
+    if not raw:
+        _b64_decode_failed = False
+        return None
+    compact = re.sub(r"\s+", "", raw)
+    try:
+        pad = (-len(compact)) % 4
+        if pad:
+            compact += "=" * pad
+        # validate=False: pasted secrets / some platforms add stray bytes; still reject tiny garbage via len check below
+        data = base64.b64decode(compact, validate=False)
+    except Exception as e:
+        _b64_decode_failed = True
+        logger.warning("YT_DLP_COOKIES_B64 is set but base64 decode failed: %s", e)
+        return None
+    if len(data) < 20:
+        _b64_decode_failed = True
+        logger.warning(
+            "YT_DLP_COOKIES_B64 decoded to only %s bytes (expected a full Netscape cookies file)",
+            len(data),
+        )
+        return None
+    out = MUSIC_DIR / ".youtube_cookies.txt"
+    try:
+        out.write_bytes(data)
+    except OSError as e:
+        _b64_decode_failed = True
+        logger.warning("Could not write cookie file to %s: %s", out, e)
+        return None
+    _b64_decode_failed = False
+    _b64_cookie_path = str(out)
+    return _b64_cookie_path
+
+
+def _yt_dlp_cookies_from_browser() -> str | None:
+    """
+    Env YT_DLP_COOKIES_FROM_BROWSER: browser name for yt-dlp --cookies-from-browser.
+    E.g. "chrome", "firefox", "safari", "edge", "brave".
+    Best for local dev where you're logged into YouTube in that browser.
+    """
+    return os.environ.get("YT_DLP_COOKIES_FROM_BROWSER", "").strip() or None
+
+
+def _yt_dlp_cookiefile() -> str | None:
+    """Netscape cookies.txt for YouTube when the host IP is challenged (common on cloud VMs)."""
+    raw = (
+        os.environ.get("YT_DLP_COOKIES_FILE", "").strip()
+        or os.environ.get("YOUTUBE_COOKIES_FILE", "").strip()
+    )
+    if raw:
+        path = Path(raw)
+        if path.is_file():
+            return str(path)
+        logger.warning(
+            "YT_DLP_COOKIES_FILE is set but file is missing or not readable: %s",
+            raw,
+        )
+    return _materialize_cookies_from_b64()
+
+
+def _youtube_extractor_args() -> dict:
+    """
+    Optional override for YouTube player clients (bot / format issues).
+
+    Env YT_DLP_YOUTUBE_PLAYER_CLIENTS: comma-separated, e.g.
+    tv_downgraded,web_safari,android_vr,mweb
+    If unset, yt-dlp uses its own defaults (with cookies it usually picks tv_downgraded,web_safari).
+    """
+    raw = os.environ.get("YT_DLP_YOUTUBE_PLAYER_CLIENTS", "").strip()
+    if not raw:
+        return {}
+    clients = [c.strip() for c in raw.split(",") if c.strip()]
+    if not clients:
+        return {}
+    return {"youtube": {"player_client": clients}}
+
+
+def _apply_cookie_opts(opts: dict) -> dict:
+    """Inject cookie authentication into yt-dlp opts (browser > file > b64)."""
+    browser = _yt_dlp_cookies_from_browser()
+    if browser:
+        opts["cookiesfrombrowser"] = (browser,)
+        return opts
+    ck = _yt_dlp_cookiefile()
+    if ck:
+        opts["cookiefile"] = ck
+    return opts
+
+
+def _merge_yt_opts(base: dict) -> dict:
+    out = {**base}
+    ex = _youtube_extractor_args()
+    if ex:
+        merged = dict(out.get("extractor_args") or {})
+        merged.update(ex)
+        out["extractor_args"] = merged
+    return out
+
+
+def youtube_cookie_health() -> dict:
+    """Non-secret diagnostics for GET /health (debugging cookie + yt-dlp issues)."""
+    browser = _yt_dlp_cookies_from_browser()
+    ck = _yt_dlp_cookiefile()
+    cookie_bytes: int | None = None
+    if ck and Path(ck).is_file():
+        cookie_bytes = Path(ck).stat().st_size
+    try:
+        from importlib.metadata import version as pkg_version
 
 def _suffix_for_mime(mime: str) -> str:
     base = (mime or "").lower().split(";")[0].strip()
