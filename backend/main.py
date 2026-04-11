@@ -44,11 +44,36 @@ ALLOW_YOUTUBE_API = os.environ.get("ALLOW_YOUTUBE_API", "false").strip().lower()
 
 app = FastAPI(title="wordplay-backend")
 
+
+def _cors_params() -> dict:
+    """
+    ``allow_origins=['*']`` breaks cross-origin requests that send ``Authorization`` with
+    ``multipart/form-data`` (Wordplaylist upload): browsers require a concrete
+    ``Access-Control-Allow-Origin`` echo, not ``*``. Use an explicit list or regex.
+    """
+    raw = os.environ.get("CORS_ORIGINS", "").strip()
+    if raw:
+        return {
+            "allow_origins": [o.strip() for o in raw.split(",") if o.strip()],
+        }
+    reg = os.environ.get("CORS_ORIGIN_REGEX", "").strip()
+    if reg:
+        return {"allow_origin_regex": reg}
+    # Default: local dev + Vercel + *.rohankokkula.dev (adjust via env if needed)
+    return {
+        "allow_origin_regex": (
+            r"^https://([a-zA-Z0-9-]+\.)*rohankokkula\.dev$"
+            r"|^https://([a-zA-Z0-9-]+\.)*vercel\.app$"
+            r"|^http://(localhost|127\.0\.0\.1)(:\d+)?$"
+        ),
+    }
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    **_cors_params(),
 )
 
 app.include_router(playlist_router)

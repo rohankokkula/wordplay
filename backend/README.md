@@ -108,7 +108,14 @@ railway volume ls                          # list volumes
 
 ## CORS
 
-`allow_origins=["*"]` — tighten for production by setting `CORS_ORIGINS`.
+Cross-origin calls with `Authorization` + file upload **do not work** with `Access-Control-Allow-Origin: *`. The API uses a **regex** by default (localhost, `*.vercel.app`, `*.rohankokkula.dev`) or set explicitly:
+
+| Variable | Description |
+|---|---|
+| `CORS_ORIGINS` | Comma-separated list, e.g. `https://wordplay.rohankokkula.dev,http://localhost:5173` (highest priority) |
+| `CORS_ORIGIN_REGEX` | Single regex if you prefer (used when `CORS_ORIGINS` is unset) |
+
+If your production domain does not match the default regex, set `CORS_ORIGINS` on Railway to your exact frontend origin (scheme + host, no path).
 
 ## License
 
