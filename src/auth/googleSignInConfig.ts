@@ -1,4 +1,5 @@
 import { googleLogout } from '@react-oauth/google';
+import type { GoogleLoginProps } from '@react-oauth/google';
 
 /**
  * Shared options for {@link GoogleLogin}:
@@ -16,3 +17,26 @@ export const googleSignInIdProps = {
     googleLogout();
   },
 } as const;
+
+/** Dark UI: filled_black button + host that doesn’t clip the taller “Sign in as …” iframe or show a white panel. */
+export const googleLoginUiProps = {
+  theme: 'filled_black' as const,
+  size: 'large' as const,
+  shape: 'pill' as const,
+  text: 'signin_with' as const,
+  width: 320,
+  containerProps: {
+    className: 'google-login-container',
+    style: {
+      width: '100%',
+      maxWidth: 360,
+      height: 'auto',
+      minHeight: 48,
+      overflow: 'visible',
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: 'transparent',
+    },
+  } satisfies GoogleLoginProps['containerProps'],
+};

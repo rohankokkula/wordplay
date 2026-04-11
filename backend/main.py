@@ -85,17 +85,29 @@ async def health(
     ),
 ):
     """
-    Liveness plus, by default, checks that match real usage:
+    Liveness plus optional deep checks **only when** ``ALLOW_YOUTUBE_API`` is enabled.
+
+    When YouTube is disabled (default in production), this never contacts YouTube or yt-dlp
+    — same as ``quick=1`` — so monitors can call ``/health`` without filling logs with
+    extractor errors.
+
+    With ``ALLOW_YOUTUBE_API=true`` and ``quick=false``:
 
     - **storage** — music cache directory is writable (needed for downloads).
     - **search** — one real `VideosSearch` query (same stack as `/api/music/search`).
     - **load** — for the first search hit, verifies stream metadata / decipher / yt-dlp
       extract (same paths as download, without saving a full file).
 
-    Probes are cached ~90s to avoid hammering YouTube. Use `quick=1` for cheap pings.
+    Probes are cached ~90s. Use ``quick=1`` to skip deep checks even when YouTube is enabled.
     """
-    if quick:
-        return {"status": "ok", "checks": {"mode": "quick"}}
+    if not ALLOW_YOUTUBE_API or quick:
+        return {
+            "status": "ok",
+            "checks": {
+                "mode": "quick",
+                **({} if ALLOW_YOUTUBE_API else {"youtube": "disabled"}),
+            },
+        }
     return await asyncio.to_thread(health_check_payload, force)
 
 

@@ -30,7 +30,7 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-Health: `GET http://localhost:8000/health?quick=1`
+Health: `GET http://localhost:8000/health` — when **`ALLOW_YOUTUBE_API` is not enabled** (default), this is a cheap liveness check only (no YouTube / yt-dlp / external probes). Deep YouTube probes run only with `ALLOW_YOUTUBE_API=true` and `quick=false`.
 
 ## Railway: `404` on `/api/auth/google` (production)
 

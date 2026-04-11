@@ -1,0 +1,41 @@
+/**
+ * Google Identity Services (“Sign in with Google”) injects a root `div[id^="gsi_"]`
+ * with nested wrappers that default to a white panel behind the button. Our app is
+ * dark-themed — force transparent shells so only the themed button shows.
+ * (Styles inside the iframe are controlled by Google; `theme="filled_black"` handles that.)
+ */
+.google-login-container {
+  background: transparent !important;
+}
+
+div[id^='gsi_'],
+div[id^='gsi_'] > div {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+/* Depth varies by GSI version — one more nested wrapper is common */
+div[id^='gsi_'] > div > div {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Known obfuscated class on the inner layout (Google may change this occasionally) */
+div[id^='gsi_'] .S9gUrf-YoZ4jf {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+
+/* Hint embedded iframes to prefer dark UI where supported */
+div[id^='gsi_'] {
+  color-scheme: dark;
+}
+
+/* @react-oauth/google forces a 40px-tall host; “Sign in as …” buttons are taller — avoid clipping that exposes white */
+div.google-login-container div[id^='gsi_'] iframe {
+  max-width: 100%;
+}

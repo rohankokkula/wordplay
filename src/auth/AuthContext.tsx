@@ -80,10 +80,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         /* ignore */
       }
-      // Relative /api/* on Vercel has no backend → 404 "Not Found"
+      // 404: either the SPA called same-origin /api (missing VITE_API_BASE) or Railway serves the wrong/old build.
       if (res.status === 404 || message === 'Not Found') {
+        const callingRailway = /^https?:\/\//i.test(url);
+        if (!callingRailway) {
+          throw new Error(
+            'API returned 404 — requests are going to this site, not Railway. In Vercel → Environment Variables set VITE_API_BASE to your API origin (no trailing slash), then Redeploy so the build picks it up.',
+          );
+        }
         throw new Error(
-          'API returned 404 — the app is not calling your Railway backend. In Vercel → Settings → Environment Variables, set VITE_API_BASE to your API origin (e.g. https://your-service.up.railway.app) with no trailing slash, then redeploy.',
+          'Backend returned 404 — Railway is running, but POST /api/auth/google is missing (stale deploy or wrong repo/root). Open your API /api/ping and /docs in the browser; push latest backend to GitHub, set Railway root to backend, redeploy.',
         );
       }
       throw new Error(message);

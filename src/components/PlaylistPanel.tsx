@@ -14,7 +14,7 @@ import {
   TextInput,
 } from '@mantine/core';
 import { IconMusic, IconPlus, IconTrash } from '@tabler/icons-react';
-import { googleSignInIdProps } from '../auth/googleSignInConfig';
+import { googleLoginUiProps, googleSignInIdProps } from '../auth/googleSignInConfig';
 import { useAuth } from '../auth/AuthContext';
 import { apiUrl } from '../apiBase';
 import { WORDPLAYLIST_DRAG_MIME } from '../wordplaylistDrag';
@@ -254,12 +254,9 @@ export function PlaylistPanel({ token, onLoadFile, embedded = false }: Props) {
         <div className="playlist-panel__google-wrap">
           <GoogleLogin
             {...googleSignInIdProps}
+            {...googleLoginUiProps}
             onSuccess={(c) => void handlePlaylistGoogleSuccess(c)}
             onError={() => setSignInError('Google sign-in was cancelled')}
-            theme="filled_black"
-            size="large"
-            shape="pill"
-            text="signin_with"
           />
         </div>
         {signingIn && (

@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { apiUrl } from '../apiBase';
+import { DEV_YOUTUBE_UI_ENABLED } from '../devYoutube';
 
 export type DeckId = 'A' | 'B';
 
@@ -110,7 +111,15 @@ type Props = {
   variant?: 'default' | 'embedded';
 };
 
-export function MusicSearch({
+/** YouTube search UI; never mounted in production (see `devYoutube.ts`). */
+export function MusicSearch(props: Props) {
+  if (!DEV_YOUTUBE_UI_ENABLED) {
+    return null;
+  }
+  return <MusicSearchImpl {...props} />;
+}
+
+function MusicSearchImpl({
   disabled,
   onAddToDeck,
   targetDeck,

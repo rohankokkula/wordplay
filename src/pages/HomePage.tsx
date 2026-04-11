@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { GoogleLogin, type CredentialResponse } from '@react-oauth/google';
 import { WordplayLogo } from '../components/WordplayLogo';
-import { googleSignInIdProps } from '../auth/googleSignInConfig';
+import { googleLoginUiProps, googleSignInIdProps } from '../auth/googleSignInConfig';
 import { useAuth } from '../auth/AuthContext';
 import App from '../App';
 import './home.css';
@@ -87,12 +87,9 @@ export default function HomePage() {
             <div className="home-google-btn-wrap">
               <GoogleLogin
                 {...googleSignInIdProps}
+                {...googleLoginUiProps}
                 onSuccess={handleGoogleSuccess}
                 onError={() => setError('Google sign-in was cancelled')}
-                theme="filled_black"
-                size="large"
-                shape="pill"
-                text="signin_with"
               />
             </div>
             {loggingIn && <p className="home-status">Signing in…</p>}

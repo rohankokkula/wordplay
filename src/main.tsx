@@ -8,6 +8,7 @@ import { MantineProvider, createTheme } from '@mantine/core';
 import { AuthProvider } from './auth/AuthContext';
 import '@mantine/core/styles.css';
 import './index.css';
+import './googleGsi.css';
 import HomePage from './pages/HomePage';
 import WordplayWall from './pages/WordplayWall';
 

@@ -27,10 +27,7 @@ import { apiUrl } from './apiBase';
 import { GENRE_PRESETS, type GenreId } from './genre/genrePresets';
 import { fetchSyncedLyrics, findCommonPhrases, transcribeWithWhisper } from './lyrics/lyricsService';
 import type { TimedLine, WordMatch } from './lyrics/types';
-
-const DEV_YOUTUBE_ALLOWED =
-  import.meta.env.VITE_ENABLE_YOUTUBE === 'true' &&
-  (import.meta.env.DEV || globalThis.location?.hostname === 'localhost');
+import { DEV_YOUTUBE_UI_ENABLED } from './devYoutube';
 
 const INITIAL_DECK: (id: 'A' | 'B') => DeckState = (id) => ({
   id,
@@ -381,7 +378,7 @@ export default function App() {
     p?.seek(t);
   }, [deckA, deckB]);
 
-  const showYouTube = DEV_YOUTUBE_ALLOWED && devYouTube;
+  const showYouTube = DEV_YOUTUBE_UI_ENABLED && devYouTube;
 
   return (
     <div className="app-layout">
@@ -422,7 +419,7 @@ export default function App() {
           </div>
           <div className="app-header-actions">
             <ExportButton />
-            {DEV_YOUTUBE_ALLOWED && (
+            {DEV_YOUTUBE_UI_ENABLED && (
               <label className="dev-toggle" title="YouTube search/paste (dev only — localhost)">
                 <input
                   type="checkbox"

@@ -133,6 +133,19 @@ export function AppSidebarLeft({
       </div>
 
       <div className="sidebar-left__wordplaylist">
+        <div className="sidebar-left__y2mate">
+          <a
+            href="https://y2mate.sc/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="sidebar-y2mate-link"
+          >
+            <span className="sidebar-y2mate-link__title">YouTube → MP3</span>
+            <span className="sidebar-y2mate-link__meta">
+              y2mate.sc · external · opens in new tab
+            </span>
+          </a>
+        </div>
         <section className="sidebar-card sidebar-card--wordplaylist">
           <div className="sidebar-card__head">
             <span className="sidebar-card__icon sidebar-card__icon--wave" aria-hidden />
