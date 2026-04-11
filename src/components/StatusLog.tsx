@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 import type { LogEntry } from '../audio/types';
 
 interface StatusLogProps {
   entries: LogEntry[];
+  /** e.g. mobile strip below transport — one line per row, scroll */
   variant?: 'default' | 'below-play';
 }
 
@@ -14,46 +15,33 @@ function fmtTimestamp(sec: number): string {
 
 export function StatusLog({ entries, variant = 'default' }: StatusLogProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
-  const [collapsed, setCollapsed] = useState(true);
 
   useEffect(() => {
-    if (!collapsed) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [entries.length, collapsed]);
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [entries.length]);
 
-  const toggle = useCallback(() => setCollapsed((c) => !c), []);
-
-  const rootClass = [
-    'status-log',
-    variant === 'below-play' ? 'status-log--below-play' : '',
-    collapsed ? 'status-log--collapsed' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const rootClass =
+    variant === 'below-play'
+      ? 'status-log status-log--below-play'
+      : 'status-log';
 
   return (
     <div className={rootClass}>
-      <div className="status-log-header" onClick={toggle} role="button" tabIndex={0}>
-        <span className="status-log-title">Live Log</span>
-        <span className="status-log-toggle">{collapsed ? '▸ Show' : '▾ Hide'}</span>
+      <div className="status-log-header">LIVE LOG</div>
+      <div className="status-log-entries">
+        {entries.length === 0 && (
+          <div className="log-entry log-system">
+            <span className="log-text">Load two tracks and press MIX</span>
+          </div>
+        )}
+        {entries.map((entry) => (
+          <div key={entry.id} className={`log-entry log-${entry.source}`}>
+            <span className="log-time">{fmtTimestamp(entry.time)}</span>
+            <span className="log-text">{entry.text}</span>
+          </div>
+        ))}
+        <div ref={bottomRef} />
       </div>
-      {!collapsed && (
-        <div className="status-log-entries">
-          {entries.length === 0 && (
-            <div className="log-entry log-system">
-              <span className="log-text">Load two tracks and press MIX</span>
-            </div>
-          )}
-          {entries.map((entry) => (
-            <div key={entry.id} className={`log-entry log-${entry.source}`}>
-              <span className="log-time">{fmtTimestamp(entry.time)}</span>
-              <span className="log-text">{entry.text}</span>
-            </div>
-          ))}
-          <div ref={bottomRef} />
-        </div>
-      )}
     </div>
   );
 }

@@ -269,8 +269,9 @@ export function Visualizer({
         }
       }
 
-      beatBlink();
-      syncLyricsDom();
+      // Lyrics UI disabled for now
+      // beatBlink();
+      // syncLyricsDom();
 
       frameRef.current = requestAnimationFrame(draw);
     };
@@ -294,10 +295,10 @@ export function Visualizer({
     if (!an) return;
 
     if (!freqDataRef.current || freqDataRef.current.length !== an.frequencyBinCount) {
-      freqDataRef.current = new Uint8Array(an.frequencyBinCount);
+      freqDataRef.current = new Uint8Array(new ArrayBuffer(an.frequencyBinCount));
     }
     const fd = freqDataRef.current;
-    an.getByteFrequencyData(fd);
+    an.getByteFrequencyData(fd as never);
 
     // Low-frequency energy (kick/snare range, bins 0-15 ≈ 0-650 Hz)
     let sum = 0;
@@ -306,11 +307,11 @@ export function Visualizer({
     const energy = sum / bins / 255; // 0–1
 
     const prevAvg = energyAvgRef.current;
-    const smoothing = 0.75;
+    const smoothing = 0.85;
     energyAvgRef.current = prevAvg * smoothing + energy * (1 - smoothing);
 
-    const isBeat = energy > energyAvgRef.current + 0.08 && energy > 0.18;
-    const randomFlip = Math.random() < 0.09;
+    const isBeat = energy > energyAvgRef.current + 0.12 && energy > 0.25;
+    const randomFlip = Math.random() < 0.06;
 
     if (isBeat || randomFlip) {
       blinkWhiteRef.current = !blinkWhiteRef.current;
@@ -463,16 +464,7 @@ export function Visualizer({
           <div className="visualizer-idle-hint">CLICK TO CYCLE PRESETS</div>
         )}
 
-        <div
-          ref={windowRef}
-          className="viz-lyrics-window"
-          style={{ display: 'none', fontFamily: LYRIC_FONTS[0] }}
-          onClick={cycleLyricFont}
-        >
-          <div ref={rowPrevRef} className="viz-lyrics-row viz-lyrics-row--prev">{NBSP}</div>
-          <div ref={rowCurrRef} className="viz-lyrics-row viz-lyrics-row--current">{NBSP}</div>
-          <div ref={rowNextRef} className="viz-lyrics-row viz-lyrics-row--next">{NBSP}</div>
-        </div>
+        {/* Lyrics UI disabled for now */}
       </div>
     </div>
   );

@@ -1,8 +1,7 @@
 import type { TimedLine } from './types';
 
-/** Advance time so the active line switches well before the LRC stamp (seconds).
- *  Higher = lyrics appear earlier, giving a karaoke-style "read ahead" feel. */
-export const LYRIC_TIMING_LEAD_SEC = 0.55;
+/** Advance time so the active line switches before the LRC stamp (seconds). */
+export const LYRIC_TIMING_LEAD_SEC = 0.35;
 
 /** Split a line into words for karaoke-style display (LRC has no word timestamps). */
 export function splitLyricWords(text: string): string[] {

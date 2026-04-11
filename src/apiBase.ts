@@ -1,6 +1,6 @@
 /**
- * Set VITE_API_BASE to your API origin (no trailing slash), e.g. https://wordplay-backend.up.railway.app.
- * On Vercel multi-service deploys with routePrefix `/_/backend`, use `/_/backend` so `/api/...` hits the FastAPI app.
+ * Set VITE_API_BASE to your API origin (no trailing slash), e.g. https://wordplay-backend.onrender.com.
+ * On Vercel multi-service (see vercel.json), use `/_/backend` so `/api/...` reaches FastAPI.
  * Leave unset in dev to use the Vite proxy to localhost:8000.
  */
 export function apiUrl(path: string): string {

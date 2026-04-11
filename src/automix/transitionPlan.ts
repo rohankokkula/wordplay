@@ -1,5 +1,62 @@
 import type { TrackAnalysis } from '../audio/types';
+import type { GenreId } from '../genre/genrePresets';
 import type { WordMatch } from '../lyrics/types';
+import { GENRE_PRESETS } from '../genre/genrePresets';
+
+export function blendDurationSec(
+  analysis: TrackAnalysis,
+  blendBeats: number,
+  genreId: GenreId = 'neutral',
+): number {
+  const base = analysis.beatInterval * blendBeats;
+  return base * GENRE_PRESETS[genreId].blendDurationScale;
+}
+
+const PHRASE_BEATS = 32;
+
+function quantizeToPhrase(time: number, analysis: TrackAnalysis): number {
+  if (analysis.beatTimes.length === 0) return time;
+
+  let bestPhrase = analysis.beatTimes[0];
+  let bestPhraseDist = Infinity;
+  let bestBeat = analysis.beatTimes[0];
+  let bestBeatDist = Infinity;
+
+  for (let i = 0; i < analysis.beatTimes.length; i++) {
+    const bt = analysis.beatTimes[i];
+    const d = Math.abs(time - bt);
+
+    if (d < bestBeatDist) {
+      bestBeat = bt;
+      bestBeatDist = d;
+    }
+
+    if (i % PHRASE_BEATS === 0 && d < bestPhraseDist) {
+      bestPhrase = bt;
+      bestPhraseDist = d;
+    }
+
+    if (bt > time + analysis.beatInterval * PHRASE_BEATS) break;
+  }
+
+  const phraseWindow = analysis.beatInterval * PHRASE_BEATS * 0.5;
+  if (bestPhraseDist <= phraseWindow) return bestPhrase;
+  return bestBeat;
+}
+
+/**
+ * Find the best vocal hook on the incoming track to seek to.
+ * Returns the hook time, or the first vocal start, or firstBeatTime.
+ */
+export function pickIncomingEntryForVocalBlend(incoming: TrackAnalysis): number {
+  if (incoming.vocalHooks.length > 0) {
+    return incoming.vocalHooks[0].time;
+  }
+  if (incoming.vocalSegments.length > 0) {
+    return incoming.vocalSegments[0].start;
+  }
+  return incoming.firstBeatTime;
+}
 
 export interface TransitionPlan {
   startSec: number;
@@ -7,215 +64,219 @@ export interface TransitionPlan {
   isVocalTransition: boolean;
   incomingSeekTime: number;
   effectiveBlendBeats: number;
-  matchedPhrase: string | null;
-  style: 'eqCrossfade' | 'dropCut' | 'echoFade';
+  /** The matched lyric phrase that triggered this transition (e.g. "tum se"). */
+  matchedPhrase?: string;
 }
 
-export interface TransitionSegment {
-  startSec: number;
-  endSec: number;
-}
-
-export interface TransitionPlanOptions {
-  outgoingDeck?: 'A' | 'B';
-  minIncomingTime?: number;
-}
-
-const PHRASE_BEATS = 32;
-
-export function blendDurationSec(analysis: TrackAnalysis, blendBeats: number): number {
-  return analysis.beatInterval * blendBeats;
-}
-
-export function autoBlendBeats(outgoing: TrackAnalysis): number {
-  const ep = outgoing.energyProfile;
-  if (ep.length < 2) return 32;
-  let mean = 0;
-  for (let i = 0; i < ep.length; i++) mean += ep[i];
-  mean /= ep.length;
-  let v = 0;
-  for (let i = 0; i < ep.length; i++) {
-    const d = ep[i] - mean;
-    v += d * d;
+/**
+ * Pick the transition point. The core logic:
+ *
+ * 1. VOCAL HOOK PRIORITY — If the outgoing track has vocal hooks detected,
+ *    try to transition at the START of a hook (where "Tum se" lives).
+ *    This creates a vocal-to-vocal handoff where both tracks are singing
+ *    the same type of phrase. The crossfade is SHORT (8 beats) so it
+ *    sounds like a deliberate mashup, not a muddy overlap.
+ *
+ * 2. VOCAL ENDING — If no hook aligns, transition at the END of a vocal
+ *    section (the old behavior) for a clean gap.
+ *
+ * 3. ENERGY VALLEY — Fallback: pick a low-energy, phrase-aligned moment.
+ */
+function matchTimesForDeck(m: WordMatch, outgoingDeck: 'A' | 'B'): { out: number; inc: number } {
+  const a = m.phraseOnsetA ?? m.timeA;
+  const b = m.phraseOnsetB ?? m.timeB;
+  if (outgoingDeck === 'A') {
+    return { out: a, inc: b };
   }
-  v /= ep.length;
-  const cv = mean > 1e-6 ? Math.sqrt(v) / mean : 0;
-  return Math.round(64 - Math.min(1, cv / 0.45) * (64 - 16));
-}
-
-export function quantizeToPhrase(time: number, analysis: TrackAnalysis): number {
-  if (analysis.beatTimes.length === 0) return time;
-  const bi = analysis.beatInterval;
-  let bestPhrase = analysis.beatTimes[0], bestPhraseDist = Infinity;
-  let bestBeat = analysis.beatTimes[0], bestBeatDist = Infinity;
-  for (let i = 0; i < analysis.beatTimes.length; i++) {
-    const bt = analysis.beatTimes[i];
-    const d = Math.abs(time - bt);
-    if (d < bestBeatDist) { bestBeat = bt; bestBeatDist = d; }
-    if (i % PHRASE_BEATS === 0 && d < bestPhraseDist) { bestPhrase = bt; bestPhraseDist = d; }
-    if (bt > time + bi * PHRASE_BEATS) break;
-  }
-  return bestPhraseDist <= bi * PHRASE_BEATS * 0.5 ? bestPhrase : bestBeat;
-}
-
-export function findNearestBeatIndex(time: number, beatTimes: number[]): number {
-  if (beatTimes.length === 0) return -1;
-  const bi = beatTimes.length >= 2 ? beatTimes[1] - beatTimes[0] : 0.5;
-  let best = 0, bestDist = Math.abs(time - beatTimes[0]);
-  for (let i = 1; i < beatTimes.length; i++) {
-    const d = Math.abs(time - beatTimes[i]);
-    if (d < bestDist) { best = i; bestDist = d; }
-    if (beatTimes[i] > time + bi) break;
-  }
-  return bestDist < bi * 0.5 ? best : -1;
-}
-
-function matchTimes(m: WordMatch, deck: 'A' | 'B'): { out: number; inc: number } {
-  const a = m.phraseOnsetA ?? m.timeA, b = m.phraseOnsetB ?? m.timeB;
-  return deck === 'A' ? { out: a, inc: b } : { out: b, inc: a };
-}
-
-function energyValleySec(a: TrackAnalysis): number | null {
-  const ep = a.energyProfile;
-  if (ep.length === 0) return null;
-  const w = a.duration / ep.length;
-  let bestI = Math.floor(ep.length * 0.5), bestE = Infinity;
-  for (let i = bestI; i < ep.length; i++) {
-    if (ep[i] < bestE) { bestE = ep[i]; bestI = i; }
-  }
-  return bestI * w;
-}
-
-function anchorsForWordplay(a: TrackAnalysis): number[] {
-  const d = a.duration, xs: number[] = [];
-  for (const s of a.vocalSegments) if (s.end >= d * 0.4) xs.push(s.end);
-  const v = energyValleySec(a);
-  if (v !== null) xs.push(v);
-  return xs;
-}
-
-function clearDrop(a: TrackAnalysis): boolean {
-  return a.dropTime > 0.5 && a.dropTime < a.duration - 0.5;
-}
-
-function defaultSeek(track: TrackAnalysis): number {
-  if (clearDrop(track)) return track.dropTime;
-  if (track.vocalHooks.length > 0) return track.vocalHooks[0].time;
-  return track.firstBeatTime;
-}
-
-function transitionStyle(o: TrackAnalysis, i: TrackAnalysis): TransitionPlan['style'] {
-  const g = Math.abs(o.bpm - i.bpm);
-  if (g > 8) return 'echoFade';
-  if (clearDrop(i) && g < 3) return 'dropCut';
-  return 'eqCrossfade';
-}
-
-function vocalGapExit(o: TrackAnalysis, blendDur: number): number | null {
-  const d = o.duration, minE = d * 0.4;
-  for (const s of [...o.vocalSegments].sort((a, b) => a.end - b.end)) {
-    if (s.end < minE) continue;
-    const q = quantizeToPhrase(s.end, o);
-    if (q + blendDur <= d - 0.02) return q;
-  }
-  return null;
-}
-
-function bestWordplay(
-  o: TrackAnalysis,
-  matches: WordMatch[],
-  blendDur: number,
-  deck: 'A' | 'B',
-  anchors: number[],
-): WordMatch | null {
-  if (!matches.length || !anchors.length) return null;
-  const d = o.duration, bi = o.beatInterval, near = bi * 16;
-  let best: WordMatch | null = null, bestScore = Infinity;
-  for (const m of matches) {
-    const outT = matchTimes(m, deck).out;
-    if (outT < d * 0.4 || outT + blendDur > d - 0.05) continue;
-    let da = Infinity;
-    for (const x of anchors) da = Math.min(da, Math.abs(outT - x));
-    if (da > near) continue;
-    const phraseDist = Math.abs(outT - quantizeToPhrase(outT, o));
-    const score = da * 100 + phraseDist;
-    if (score < bestScore) { bestScore = score; best = m; }
-  }
-  return best;
-}
-
-function buildPlan(
-  start: number,
-  o: TrackAnalysis,
-  i: TrackAnalysis,
-  beats: number,
-  kind: 'vocalGap' | 'valley' | 'wordplay' | 'fallback',
-  wm: WordMatch | null,
-  deck: 'A' | 'B',
-  floor: number,
-): TransitionPlan {
-  const vocal = kind === 'vocalGap' || kind === 'wordplay';
-  const eff = kind === 'wordplay' ? Math.min(beats, 16) : beats;
-  const bd = blendDurationSec(o, eff);
-  let seek: number;
-  if (kind === 'wordplay' && wm) {
-    const inc = matchTimes(wm, deck).inc;
-    const lead = Math.min(3, Math.max(2, o.beatInterval * 2));
-    seek = Math.max(floor, inc - lead);
-  } else seek = Math.max(floor, defaultSeek(i));
-  return {
-    startSec: start,
-    endSec: Math.min(o.duration, start + bd),
-    isVocalTransition: vocal,
-    incomingSeekTime: seek,
-    effectiveBlendBeats: eff,
-    matchedPhrase: wm ? wm.phrase : null,
-    style: transitionStyle(o, i),
-  };
+  return { out: b, inc: a };
 }
 
 export function pickTransitionPlan(
   outgoing: TrackAnalysis,
-  incoming: TrackAnalysis,
-  wordMatches: WordMatch[] | undefined,
-  blendBeats?: number,
-  opts?: TransitionPlanOptions,
+  currentTime: number,
+  blendBeats: number,
+  genreId: GenreId = 'neutral',
+  incoming?: TrackAnalysis,
+  wordMatches?: WordMatch[],
+  outgoingDeck: 'A' | 'B' = 'A',
+  /** Never seek the incoming deck before this time (where it last stopped). */
+  minIncomingTime = 0,
 ): TransitionPlan {
-  const beats = blendBeats ?? autoBlendBeats(outgoing);
-  const blendDur = blendDurationSec(outgoing, beats);
-  const floor = Math.max(0, opts?.minIncomingTime ?? 0);
-  const deck = opts?.outgoingDeck ?? 'A';
+  const blendDur = blendDurationSec(outgoing, blendBeats, genreId);
+  const vocalBlendBeats = Math.min(blendBeats, 8);
+  const floor = Math.max(0, minIncomingTime);
 
-  const vg = vocalGapExit(outgoing, blendDur);
-  if (vg !== null) return buildPlan(vg, outgoing, incoming, beats, 'vocalGap', null, deck, floor);
+  // ── Strategy 0: Word-match (highest priority — the "Wordplay" transition) ──
+  // Seek the incoming track to 2-3 seconds BEFORE the matched phrase so the
+  // genre instrumental plays for a beat or two, then the vocal swaps in naturally.
+  // The floor only prevents seeking to literally 0:00 — any non-zero timestamp
+  // is valid for creative back-and-forth wordplay jumps.
+  if (wordMatches && wordMatches.length > 0) {
+    const wordBlendBeats = Math.min(blendBeats, 4);
+    const wordDur = blendDurationSec(outgoing, wordBlendBeats, genreId);
+    const bi = outgoing.beatInterval;
+    const leadInSec = Math.max(2.0, bi * 4);
 
-  const vr = energyValleySec(outgoing);
-  if (vr !== null) {
-    const qv = quantizeToPhrase(vr, outgoing);
-    if (qv + blendDur <= outgoing.duration - 0.02) {
-      return buildPlan(qv, outgoing, incoming, beats, 'valley', null, deck, floor);
+    const mapped = wordMatches.map((m) => ({ m, ...matchTimesForDeck(m, outgoingDeck) }));
+    const ordered = [...mapped].sort((a, b) => a.out - b.out);
+
+    for (const { m, out: outTime } of ordered) {
+      if (outTime < currentTime - 0.2) continue;
+      if (outTime > outgoing.duration - wordDur) continue;
+
+      const normPhrase = m.phrase.toLowerCase();
+      // Allow any incoming timestamp > 5 seconds (blocks only true start-of-track)
+      const safeFloor = Math.max(5, floor);
+      const incCandidates = mapped
+        .filter((c) => c.m.phrase.toLowerCase() === normPhrase && c.inc > safeFloor)
+        .map((c) => c.inc);
+
+      if (incCandidates.length === 0) {
+        console.log(`[wordplay] phrase="${m.phrase}" outTime=${outTime.toFixed(2)} — no inc candidates past floor ${safeFloor.toFixed(2)}, skipping`);
+        continue;
+      }
+
+      const incTime = incCandidates[Math.floor(Math.random() * incCandidates.length)];
+      const seekTo = Math.max(safeFloor, incTime - leadInSec);
+
+      console.log(
+        `[wordplay] phrase="${m.phrase}" outTime=${outTime.toFixed(2)} floor=${safeFloor.toFixed(2)} ` +
+        `incCandidates=[${incCandidates.map(t => t.toFixed(2)).join(',')}] ` +
+        `picked=${incTime.toFixed(2)} seekTo=${seekTo.toFixed(2)} (lead-in ${(incTime - seekTo).toFixed(1)}s)`,
+      );
+
+      return {
+        startSec: outTime,
+        endSec: Math.min(outgoing.duration, outTime + wordDur),
+        isVocalTransition: true,
+        incomingSeekTime: seekTo,
+        effectiveBlendBeats: wordBlendBeats,
+        matchedPhrase: m.phrase,
+      };
+    }
+
+    console.log(`[wordplay] all cues past or no valid inc times (floor=${floor.toFixed(2)}), falling through`);
+  }
+
+  // ── Strategy 1: Vocal hook on outgoing track ──
+  if (outgoing.vocalHooks.length > 0 && incoming) {
+    const incomingHasVocals = incoming.vocalSegments.length > 0;
+
+    if (incomingHasVocals) {
+      for (const hook of outgoing.vocalHooks) {
+        if (hook.time <= currentTime + 2) continue;
+        if (hook.time > outgoing.duration - blendDur * 0.5) continue;
+
+        const hookPhrase = quantizeToPhrase(hook.time, outgoing);
+        const rawEntry = pickIncomingEntryForVocalBlend(incoming);
+        const vocalDur = blendDurationSec(outgoing, vocalBlendBeats, genreId);
+
+        return {
+          startSec: hookPhrase,
+          endSec: Math.min(outgoing.duration, hookPhrase + vocalDur),
+          isVocalTransition: true,
+          incomingSeekTime: Math.max(floor, rawEntry),
+          effectiveBlendBeats: vocalBlendBeats,
+        };
+      }
     }
   }
 
-  const ax = anchorsForWordplay(outgoing);
-  const wp = wordMatches?.length ? bestWordplay(outgoing, wordMatches, blendDur, deck, ax) : null;
-  if (wp) {
-    const q = quantizeToPhrase(matchTimes(wp, deck).out, outgoing);
-    if (q + blendDur <= outgoing.duration - 0.02) {
-      return buildPlan(q, outgoing, incoming, beats, 'wordplay', wp, deck, floor);
+  // ── Strategy 2: End of a vocal section (clean gap transition) ──
+  for (const seg of outgoing.vocalSegments) {
+    if (seg.end > currentTime + 2 && seg.end < outgoing.duration - blendDur) {
+      const exitTime = quantizeToPhrase(seg.end, outgoing);
+      const rawEntry = incoming
+        ? pickIncomingEntryForVocalBlend(incoming)
+        : 0;
+
+      return {
+        startSec: exitTime,
+        endSec: Math.min(outgoing.duration, exitTime + blendDur),
+        isVocalTransition: false,
+        incomingSeekTime: Math.max(floor, rawEntry),
+        effectiveBlendBeats: blendBeats,
+      };
     }
   }
 
-  const fb = quantizeToPhrase(outgoing.duration * 0.75, outgoing);
-  return buildPlan(fb, outgoing, incoming, beats, 'fallback', null, deck, floor);
+  // ── Strategy 3: Energy valley / phrase boundary fallback ──
+  const windowDur = outgoing.duration / outgoing.energyProfile.length;
+  const currentIdx = Math.floor(currentTime / windowDur);
+  const endIdx = outgoing.energyProfile.length - Math.ceil(blendDur / windowDur);
+
+  let bestIdx = -1;
+  let bestScore = Infinity;
+
+  for (let i = currentIdx + 4; i < endIdx; i++) {
+    const e = outgoing.energyProfile[i];
+    const falling = i > 0 && outgoing.energyProfile[i] < outgoing.energyProfile[i - 1];
+
+    let score = e + (falling ? -0.15 : 0);
+
+    const candidateTime = i * windowDur;
+    const beatIdx = findNearestBeatIndex(candidateTime, outgoing);
+    if (beatIdx >= 0 && beatIdx % PHRASE_BEATS === 0) score -= 0.25;
+    else if (beatIdx >= 0 && beatIdx % 4 === 0) score -= 0.08;
+
+    if (incoming) {
+      const inWindowDur = incoming.duration / incoming.energyProfile.length;
+      const entryIdx = Math.min(
+        Math.floor(incoming.firstBeatTime / inWindowDur) + 2,
+        incoming.energyProfile.length - 1,
+      );
+      if (entryIdx > 0 && incoming.energyProfile[entryIdx] > incoming.energyProfile[entryIdx - 1]) {
+        score -= 0.1;
+      }
+    }
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
+  }
+
+  const exitTime = bestIdx >= 0
+    ? quantizeToPhrase(bestIdx * windowDur, outgoing)
+    : quantizeToPhrase(Math.max(currentTime + 2, outgoing.duration - blendDur), outgoing);
+
+  const rawEntry = incoming
+    ? pickIncomingEntryForVocalBlend(incoming)
+    : 0;
+
+  return {
+    startSec: exitTime,
+    endSec: Math.min(outgoing.duration, exitTime + blendDur),
+    isVocalTransition: false,
+    incomingSeekTime: Math.max(floor, rawEntry),
+    effectiveBlendBeats: blendBeats,
+  };
+}
+
+function findNearestBeatIndex(time: number, a: TrackAnalysis): number {
+  if (a.beatTimes.length === 0) return -1;
+  let best = 0;
+  let bestDist = Math.abs(time - a.beatTimes[0]);
+  for (let i = 1; i < a.beatTimes.length; i++) {
+    const d = Math.abs(time - a.beatTimes[i]);
+    if (d < bestDist) {
+      best = i;
+      bestDist = d;
+    }
+    if (a.beatTimes[i] > time + a.beatInterval) break;
+  }
+  return bestDist < a.beatInterval * 0.5 ? best : -1;
 }
 
 export function transitionSegmentForOutgoingDeck(
-  outgoing: TrackAnalysis,
-  incoming: TrackAnalysis,
-  wordMatches: WordMatch[] | undefined,
-  blendBeats?: number,
-  opts?: TransitionPlanOptions,
+  analysis: TrackAnalysis,
+  currentTime: number,
+  blendBeats: number,
+  genreId: GenreId = 'neutral',
+  incoming?: TrackAnalysis,
+  wordMatches?: WordMatch[],
+  outgoingDeck: 'A' | 'B' = 'A',
+  minIncomingTime = 0,
 ): TransitionPlan {
-  return pickTransitionPlan(outgoing, incoming, wordMatches, blendBeats, opts);
+  return pickTransitionPlan(analysis, currentTime, blendBeats, genreId, incoming, wordMatches, outgoingDeck, minIncomingTime);
 }
