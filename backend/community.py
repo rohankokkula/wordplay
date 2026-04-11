@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth import get_current_user, get_optional_user
+from wordplay_auth import get_current_user, get_optional_user
 from db import async_session
 from models import WordplayPost, User
 from storage import get_upload_root

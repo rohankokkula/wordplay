@@ -33,7 +33,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from music_fetch import download_youtube_audio, health_check_payload, search_youtube
-from auth import GoogleLoginRequest, google_login, get_current_user
+from wordplay_auth import GoogleLoginRequest, google_login, get_current_user
 from db import init_db
 from playlist import router as playlist_router
 from community import router as community_router
@@ -300,6 +300,7 @@ async def lyrics_transcribe(file: UploadFile = File(...)):
     if not file.filename:
         raise HTTPException(400, "No file uploaded")
 
+    tmp_path: str | None = None
     suffix = Path(file.filename).suffix or ".wav"
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -317,7 +318,8 @@ async def lyrics_transcribe(file: UploadFile = File(...)):
         logger.exception("Transcription failed")
         raise HTTPException(502, f"Transcription failed: {e}") from e
     finally:
-        try:
-            Path(tmp_path).unlink(missing_ok=True)
-        except Exception:
-            pass
+        if tmp_path is not None:
+            try:
+                Path(tmp_path).unlink(missing_ok=True)
+            except Exception:
+                pass

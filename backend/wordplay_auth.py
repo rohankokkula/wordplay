@@ -49,11 +49,6 @@ def _decode_jwt(token: str) -> dict:
     return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
 
 
-async def _get_db() -> AsyncSession:  # type: ignore[misc]
-    async with async_session() as session:
-        yield session
-
-
 async def google_login(body: GoogleLoginRequest) -> TokenResponse:
     if body.invite_code.strip().lower() != INVITE_CODE.lower():
         raise HTTPException(403, "Invalid invite code")

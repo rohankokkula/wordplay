@@ -13,6 +13,7 @@ sqlalchemy[asyncio]>=2.0
 asyncpg
 aiosqlite  # local dev when DATABASE_URL unset (sqlite+aiosqlite://)
 google-auth>=2.0
+requests  # required by google.auth.transport.requests (verify_oauth2_token)
 pyjwt>=2.0
 aiofiles
 mutagen>=1.47

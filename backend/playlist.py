@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy import select, delete as sa_delete
 
-from auth import get_current_user
+from wordplay_auth import get_current_user
 from db import async_session
 from models import PlaylistItem
 from playlist_metadata import extract_audio_metadata
