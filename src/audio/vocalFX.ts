@@ -1,7 +1,7 @@
 import type { TrackAnalysis, VocalHook, VocalSegment } from './types';
 import { getAudioContext } from './mixer';
 import { getFXChain } from './effects';
-import { createReverbIR } from './effects';
+import { createReverbIR } from './djSfx';
 
 /**
  * VocalFXEngine — intelligent, position-aware vocal effects.

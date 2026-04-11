@@ -1,101 +1,64 @@
 # wordplay-backend
 
-FastAPI service powering Wordplay's YouTube search, audio download, lyrics proxy, and Whisper transcription.
+FastAPI service for YouTube search, audio download, LRCLib lyrics proxy, and Whisper transcription.
+
+## Stack (production-friendly default)
+
+- **Search:** [yt-search-python](https://pypi.org/project/yt-search-python/) (`VideosSearch`) — no API key, **no cookies**.
+- **Download:** Try **innertube** streams (`Video` + `StreamURLFetcher` + **httpx**) when YouTube returns `streamingData`. Often innertube returns **no** formats; then the server **falls back to [yt-dlp](https://github.com/yt-dlp/yt-dlp)** to fetch audio (`bestaudio/best`). That path is what keeps production working when the lightweight API stops exposing streams.
+
+You do **not** need `YT_DLP_COOKIES_*` for normal operation. If a cloud IP is still blocked, advanced cookie setups apply only to yt-dlp, not to search.
 
 ## Requirements
 
 | Tool | Version | Notes |
 |---|---|---|
 | Python | 3.11+ | 3.12 recommended |
-| ffmpeg | any | Strongly recommended for MP3 transcoding |
 | pip | latest | `pip install --upgrade pip` |
+| ffmpeg | recommended | Used by yt-dlp fallback for MP3 extraction (`FFmpegExtractAudio`). Without it, yt-dlp may still save raw `m4a`/`webm`. |
 
 ## Quick Start
 
-From the `backend/` directory (this folder in the repo):
+From the `backend/` directory:
 
 ```bash
-cd backend
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env        # edit to add YouTube cookies if needed
 uvicorn main:app --reload --port 8000
 ```
 
-Health check: `GET http://localhost:8000/health`
+Optional: create `.env` in this folder if you use tools that read `python-dotenv` (see `main.py`).
+
+Health: `GET http://localhost:8000/health` → `{"status":"ok"}`
 
 ## API Endpoints
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Liveness + YouTube cookie/yt-dlp diagnostics |
-| `GET` | `/api/music/search?q=...&limit=8` | YouTube search (returns `{ results: [...] }`) |
-| `POST` | `/api/music/download` | Download audio from YouTube URL (`{ url }`) |
-| `POST` | `/api/genre/instrumental` | Download and cache a genre instrumental track |
-| `GET` | `/api/genre/instrumental/:id` | Check if a genre instrumental is cached |
-| `GET` | `/api/genre/instrumental/:id/audio` | Serve a cached genre instrumental |
-| `GET` | `/api/lyrics/search?q=...` | Proxy to LRCLib synced-lyrics search |
-| `GET` | `/api/lyrics/get?track_name=...&artist_name=...` | Proxy to LRCLib exact lookup |
-| `POST` | `/api/lyrics/transcribe` | Whisper transcription of uploaded audio |
+| `GET` | `/health` | Liveness |
+| `GET` | `/api/music/search?q=...&limit=8` | YouTube search → `{ results: [...] }` |
+| `POST` | `/api/music/download` | JSON `{ "url": "<YouTube URL>" }` → audio file |
+| `GET` | `/api/lyrics/search?q=...` | LRCLib search proxy |
+| `GET` | `/api/lyrics/get?...` | LRCLib exact lookup |
+| `POST` | `/api/lyrics/transcribe` | Whisper transcription |
 
-## Environment Variables
+## Environment (all optional)
 
-See [`.env.example`](.env.example) for the full list. All are optional.
-
-| Variable | Description |
+| Variable | When to use |
 |---|---|
-| `YT_DLP_COOKIES_FILE` | Absolute path to Netscape `cookies.txt` |
-| `YT_DLP_COOKIES_B64` | Base64 of cookies file (cloud-friendly, one line) |
-| `YT_DLP_COOKIES_FROM_BROWSER` | Browser name for local dev (`chrome`, `firefox`, etc.) |
-| `YT_DLP_YOUTUBE_PLAYER_CLIENTS` | Comma-separated yt-dlp player clients override |
-| `FFMPEG_LOCATION` | Directory containing `ffmpeg` + `ffprobe` |
-| `SSL_CERT_FILE` | Path to CA bundle for corporate proxy environments |
-| `SOBEROHAN_INSECURE_SSL` | `1` to disable TLS verification (dev only) |
+| `SSL_CERT_FILE` | Corporate proxy / custom CA |
+| `SOBEROHAN_INSECURE_SSL` | Dev only — never in production |
 
-## YouTube Cookie Authentication
-
-Cloud servers frequently get blocked by YouTube bot checks. To fix this:
-
-1. Install a Netscape cookie exporter in your browser
-2. Export cookies from `youtube.com` while logged in
-3. Choose one method:
-
-```bash
-# Option A: file path
-YT_DLP_COOKIES_FILE=/path/to/cookies.txt
-
-# Option B: base64 (cloud-friendly)
-cd backend && base64 -i cookies.txt | tr -d '\n'
-# paste the output into .env as YT_DLP_COOKIES_B64=...
-
-# Option C: local browser (dev only)
-YT_DLP_COOKIES_FROM_BROWSER=chrome
-```
-
-`GET /health` returns `youtube_cookies: true/false` so you can verify.
+Advanced (only if YouTube blocks your server IP): Netscape `cookies.txt` via external tooling — not wired in this minimal `music_fetch`; use a dedicated yt-dlp deployment if you need cookie auth.
 
 ## CORS
 
-All origins are allowed (`*`) in development. Tighten `allow_origins` in `main.py` before exposing to the public internet.
+`allow_origins=["*"]` in `main.py` — tighten for public production APIs.
 
 ## Cache
 
-Downloaded audio is stored in `music_cache/` (auto-created, gitignored). Safe to delete when the server is stopped.
-
-## Production Deployment (Railway)
-
-1. Set **Root Directory** to `backend` in Railway
-2. Railway auto-detects Python and installs `requirements.txt`
-3. Set the **Start Command**:
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port $PORT
-```
-
-4. Add environment variables (see `.env.example`)
-
-Do **not** use `--reload` in production. Ensure `ffmpeg` is available in the runtime environment (Railway's Python buildpack includes it by default).
+`music_cache/` — auto-created, gitignored.
 
 ## License
 

@@ -321,8 +321,9 @@ function phraseOnsetInLine(
 }
 
 /**
- * Find common phrases (2+ words) between two lyric sets.
- * Stores phraseOnsetA/B so transitions jump to the phrase, not only line start.
+ * Find common phrases between two lyric sets.
+ * Includes 2+ word n-grams and single meaningful words (≥3 chars) for rap hooks like "monica".
+ * Stores phraseOnsetA/B so transitions jump to the phrase, not only line start (avoids 00:00 jumps).
  */
 export function findCommonPhrases(
   lyricsA: TimedLine[],
@@ -364,30 +365,43 @@ export function findCommonPhrases(
   for (let ia = 0; ia < lyricsA.length; ia++) {
     const lineA = lyricsA[ia];
     const tokensA = tokenize(lineA.text);
-    if (tokensA.length < 2) continue;
+    if (tokensA.length === 0) continue;
 
     for (let ib = 0; ib < lyricsB.length; ib++) {
       const lineB = lyricsB[ib];
       const normB = normalize(lineB.text);
       if (!normB.length) continue;
 
-      for (let lenA = tokensA.length; lenA >= 2; lenA--) {
-        for (let startA = 0; startA <= tokensA.length - lenA; startA++) {
-          const ngram = tokensA.slice(startA, startA + lenA).join(' ');
-          if (!normB.includes(ngram)) continue;
+      // Multi-word n-grams (2+)
+      if (tokensA.length >= 2) {
+        for (let lenA = tokensA.length; lenA >= 2; lenA--) {
+          for (let startA = 0; startA <= tokensA.length - lenA; startA++) {
+            const ngram = tokensA.slice(startA, startA + lenA).join(' ');
+            if (!normB.includes(ngram)) continue;
 
-          const wordCount = lenA;
-          let score = wordCount * 10;
-          if (startA === 0) score += 5;
-          if (normB.startsWith(ngram)) score += 5;
-          if (wordCount >= 3) score += 8;
+            let score = ngram.split(' ').length * 10;
+            if (startA === 0) score += 5;
+            if (normB.startsWith(ngram)) score += 5;
+            if (ngram.split(' ').length >= 3) score += 8;
 
-          pushMatch(ia, ib, ngram, ngram.split(' '), score);
+            pushMatch(ia, ib, ngram, ngram.split(' '), score);
+          }
         }
+      }
+
+      // Single-word hooks (e.g. names) — min 3 chars
+      const seenTok = new Set<string>();
+      for (const tok of tokensA) {
+        if (tok.length < 3) continue;
+        if (seenTok.has(tok)) continue;
+        seenTok.add(tok);
+        if (!normB.includes(tok)) continue;
+        const score = 18 + (tok.length >= 5 ? 6 : 0);
+        pushMatch(ia, ib, tok, [tok], score);
       }
     }
   }
 
   matches.sort((a, b) => b.score - a.score);
-  return matches.slice(0, 20);
+  return matches.slice(0, 40);
 }

@@ -17,28 +17,6 @@ type SearchHit = {
   thumbnail?: string;
 };
 
-function fmtDur(sec: number | null): string {
-  if (sec == null || !isFinite(sec) || sec < 0) return '';
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-/** Remaining time for “est. … left” (no leading tilde). */
-function fmtEtaRemain(sec: number): string {
-  if (!isFinite(sec) || sec <= 0) return '';
-  if (sec < 90) return `${Math.max(1, Math.round(sec))}s`;
-  const m = Math.floor(sec / 60);
-  const s = Math.round(sec % 60);
-  return `${m}m ${s}s`;
-}
-
-/** Rough expected file size for MP3-ish audio when Content-Length is missing (bytes). */
-function estimatedBytesFromDuration(durationSec: number | null): number | null {
-  if (durationSec == null || !isFinite(durationSec) || durationSec <= 0) return null;
-  return Math.max(80_000, Math.floor(durationSec * 16_000));
-}
-
 /** If the field looks like a YouTube watch/embed/short URL, return canonical watch URL + id. */
 function parseYouTubePaste(raw: string): { id: string; url: string } | null {
   let t = raw.trim();
@@ -54,7 +32,6 @@ function parseYouTubePaste(raw: string): { id: string; url: string } | null {
   }
   const host = url.hostname.replace(/^www\./, '').toLowerCase();
 
-  /** YouTube video IDs are 11 characters (base64-like). */
   const idOk = (id: string) => /^[a-zA-Z0-9_-]{11}$/.test(id);
 
   if (host === 'youtu.be') {
@@ -83,6 +60,28 @@ function parseYouTubePaste(raw: string): { id: string; url: string } | null {
   }
 
   return null;
+}
+
+function fmtDur(sec: number | null): string {
+  if (sec == null || !isFinite(sec) || sec < 0) return '';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/** Remaining time for “est. … left” (no leading tilde). */
+function fmtEtaRemain(sec: number): string {
+  if (!isFinite(sec) || sec <= 0) return '';
+  if (sec < 90) return `${Math.max(1, Math.round(sec))}s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}m ${s}s`;
+}
+
+/** Rough expected file size for MP3-ish audio when Content-Length is missing (bytes). */
+function estimatedBytesFromDuration(durationSec: number | null): number | null {
+  if (durationSec == null || !isFinite(durationSec) || durationSec <= 0) return null;
+  return Math.max(80_000, Math.floor(durationSec * 16_000));
 }
 
 function errorFromApiBody(text: string, fallback: string): string {
@@ -171,6 +170,7 @@ export function MusicSearch({
           title: 'YouTube link (paste)',
           duration: null,
           url: yt.url,
+          thumbnail: `https://img.youtube.com/vi/${yt.id}/mqdefault.jpg`,
         },
       ]);
       return;
@@ -293,7 +293,9 @@ export function MusicSearch({
         onAddToDeck(deck, file);
       } catch (e) {
         setSearchError(
-          e instanceof Error ? e.message : 'Download failed — check ffmpeg and yt-dlp on the server',
+          e instanceof Error
+            ? e.message
+            : 'Download failed — check the API is running and reachable',
         );
       } finally {
         setDownloadingKey(null);
