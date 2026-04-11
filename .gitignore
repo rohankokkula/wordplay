@@ -24,16 +24,9 @@ dist-ssr
 *.sln
 *.sw?
 
-# Backend temp / cache
-backend/music_cache
-backend/uploads
-backend/output
-
 # Secrets & credentials
 .env
 .env.*
-backend/.env
-backend/cookies.txt
 *.local
 
 # Python

@@ -1,8 +1,0 @@
-fastapi
-uvicorn[standard]
-python-multipart
-python-dotenv
-yt-dlp>=2025.10.22
-yt-search-python>=2.0.0
-httpx
-faster-whisper
