@@ -5,8 +5,10 @@ Search: yt-search-python — VideosSearch (no cookies).
 
 Download strategy:
 1) Prefer Video + StreamURLFetcher + httpx when innertube returns stream manifests.
-2) Fall back to yt-dlp when streamingData is missing/empty (common with YouTube API changes)
-   or when signature resolution fails — same stack users expect for reliable production downloads.
+   Stream downloads use browser-like headers so googlevideo URLs work from datacenter IPs.
+2) Fall back to yt-dlp with rotating YouTube *player_client* values (android, ios, mweb, …).
+   Railway/Vercel IPs often hit “Sign in to confirm you’re not a bot” on the default *web* client;
+   mobile/TV clients usually still work without cookies (same as local dev).
 """
 
 from __future__ import annotations
@@ -46,6 +48,18 @@ MUSIC_DIR.mkdir(parents=True, exist_ok=True)
 
 _SAFE_NAME = re.compile(r"[^a-zA-Z0-9._\- ()\[\]]+")
 
+# googlevideo / YouTube CDN often 403s streams from servers without Referer / UA.
+_STREAM_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.youtube.com/",
+    "Origin": "https://www.youtube.com",
+}
+
 _stream_fetcher: StreamURLFetcher | None = None
 
 
@@ -54,6 +68,26 @@ def _get_stream_fetcher() -> StreamURLFetcher:
     if _stream_fetcher is None:
         _stream_fetcher = StreamURLFetcher()
     return _stream_fetcher
+
+
+def _is_youtube_bot_challenge(message: str) -> bool:
+    m = message.lower()
+    return ("sign in" in m and "bot" in m) or "not a bot" in m
+
+
+def _yt_dlp_youtube_extractor_arg_attempts() -> list[dict]:
+    """
+    Order matters: datacenter-friendly clients first; plain `web` last.
+    Each value is merged into yt-dlp `extractor_args`.
+    """
+    return [
+        {"youtube": {"player_client": ["android"]}},
+        {"youtube": {"player_client": ["ios"]}},
+        {"youtube": {"player_client": ["mweb"]}},
+        {"youtube": {"player_client": ["tv_embedded"]}},
+        {"youtube": {"player_client": ["android", "web"]}},
+        {"youtube": {"player_client": ["web"]}},
+    ]
 
 
 def _ffmpeg_bin_dir() -> str | None:
@@ -204,72 +238,81 @@ def _download_via_ytdlp(url: str) -> tuple[Path, str]:
         raise ValueError("Only http(s) YouTube watch URLs are allowed")
 
     ffmpeg_dir = _ffmpeg_bin_dir()
-    title = "track"
     last_err: Exception | None = None
 
-    for use_postprocessor in (True, False):
-        token = uuid.uuid4().hex[:16]
-        out_template = str(MUSIC_DIR / f"{token}.%(ext)s")
-        ydl_opts: dict = {
-            "outtmpl": out_template,
-            "quiet": True,
-            "no_warnings": True,
-            "no_color": True,
-            "noplaylist": True,
-        }
-        if ffmpeg_dir:
-            ydl_opts["ffmpeg_location"] = ffmpeg_dir
+    for extractor_args in _yt_dlp_youtube_extractor_arg_attempts():
+        title = "track"
+        for use_postprocessor in (True, False):
+            token = uuid.uuid4().hex[:16]
+            out_template = str(MUSIC_DIR / f"{token}.%(ext)s")
+            ydl_opts: dict = {
+                "outtmpl": out_template,
+                "quiet": True,
+                "no_warnings": True,
+                "no_color": True,
+                "noplaylist": True,
+                "extractor_args": extractor_args,
+            }
+            if ffmpeg_dir:
+                ydl_opts["ffmpeg_location"] = ffmpeg_dir
 
-        if use_postprocessor:
-            ydl_opts["format"] = "bestaudio/best"
-            ydl_opts["postprocessors"] = [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }]
-        else:
-            ydl_opts["format"] = "bestaudio/best"
-
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                if info is None:
-                    raise RuntimeError("Download produced no metadata.")
-                title = (info.get("title") or "track").strip() or "track"
-        except Exception as e:
-            last_err = e
-            err_s = str(e).lower()
-            if use_postprocessor and ("ffmpeg" in err_s or "ffprobe" in err_s):
-                for p in MUSIC_DIR.glob(f"{token}.*"):
-                    try:
-                        p.unlink()
-                    except OSError:
-                        pass
-                continue
-            raise RuntimeError(str(e)) from e
-
-        path = MUSIC_DIR / f"{token}.mp3"
-        if not path.is_file():
-            matches = [
-                p for p in MUSIC_DIR.glob(f"{token}.*")
-                if p.suffix.lower() in (".mp3", ".m4a", ".opus", ".webm", ".ogg", ".aac", ".flac")
-            ]
-            path = matches[0] if matches else path
-
-        if not path.is_file():
             if use_postprocessor:
-                for p in MUSIC_DIR.glob(f"{token}.*"):
-                    try:
-                        p.unlink()
-                    except OSError:
-                        pass
-                continue
-            raise RuntimeError("Download finished but no audio file was produced.")
+                ydl_opts["format"] = "bestaudio/best"
+                ydl_opts["postprocessors"] = [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }]
+            else:
+                ydl_opts["format"] = "bestaudio/best"
 
-        safe = _SAFE_NAME.sub("_", title)[:120].strip("._") or "track"
-        if not safe.lower().endswith(path.suffix.lower()):
-            safe = f"{safe}{path.suffix}"
-        return path, safe
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    if info is None:
+                        raise RuntimeError("Download produced no metadata.")
+                    title = (info.get("title") or "track").strip() or "track"
+            except Exception as e:
+                last_err = e
+                err_s = str(e).lower()
+                if use_postprocessor and ("ffmpeg" in err_s or "ffprobe" in err_s):
+                    for p in MUSIC_DIR.glob(f"{token}.*"):
+                        try:
+                            p.unlink()
+                        except OSError:
+                            pass
+                    continue
+                if _is_youtube_bot_challenge(str(e)):
+                    for p in MUSIC_DIR.glob(f"{token}.*"):
+                        try:
+                            p.unlink()
+                        except OSError:
+                            pass
+                    break
+                raise RuntimeError(str(e)) from e
+
+            path = MUSIC_DIR / f"{token}.mp3"
+            if not path.is_file():
+                matches = [
+                    p for p in MUSIC_DIR.glob(f"{token}.*")
+                    if p.suffix.lower() in (".mp3", ".m4a", ".opus", ".webm", ".ogg", ".aac", ".flac")
+                ]
+                path = matches[0] if matches else path
+
+            if not path.is_file():
+                if use_postprocessor:
+                    for p in MUSIC_DIR.glob(f"{token}.*"):
+                        try:
+                            p.unlink()
+                        except OSError:
+                            pass
+                    continue
+                raise RuntimeError("Download finished but no audio file was produced.")
+
+            safe = _SAFE_NAME.sub("_", title)[:120].strip("._") or "track"
+            if not safe.lower().endswith(path.suffix.lower()):
+                safe = f"{safe}{path.suffix}"
+            return path, safe
 
     msg = str(last_err) if last_err else "unknown error"
     raise RuntimeError(f"{msg}\nInstall ffmpeg if transcoding failed.")
@@ -314,7 +357,11 @@ def download_youtube_audio(url: str) -> tuple[Path, str]:
     out_path = MUSIC_DIR / f"{token}{suffix}"
 
     try:
-        with httpx.Client(timeout=httpx.Timeout(600.0), follow_redirects=True) as client:
+        with httpx.Client(
+            timeout=httpx.Timeout(600.0),
+            follow_redirects=True,
+            headers=_STREAM_HEADERS,
+        ) as client:
             with client.stream("GET", stream_url) as resp:
                 resp.raise_for_status()
                 with open(out_path, "wb") as f:
