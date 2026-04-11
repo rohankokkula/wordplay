@@ -3,6 +3,11 @@ logs
 *.log
 *.local
 
+# Local frontend leftovers (not used on this branch)
+node_modules
+dist
+.vite
+
 # Editor
 .idea
 .DS_Store
