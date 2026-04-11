@@ -26,10 +26,27 @@ from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from music_fetch import download_youtube_audio, search_youtube
 
 logger = logging.getLogger("wordplay")
+
+# Must match vercel.json experimentalServices.backend.routePrefix (Vercel forwards full path).
+_VERCEL_BACKEND_PREFIX = "/_/backend"
+
+
+class StripVercelBackendPrefixMiddleware(BaseHTTPMiddleware):
+    """So routes stay `/api/...` while the public URL is `/_/backend/api/...`."""
+
+    async def dispatch(self, request: Request, call_next):
+        if request.scope.get("type") == "http":
+            path = request.scope.get("path") or ""
+            if path.startswith(_VERCEL_BACKEND_PREFIX):
+                request.scope["path"] = path[len(_VERCEL_BACKEND_PREFIX) :] or "/"
+        return await call_next(request)
+
 
 app = FastAPI(title="wordplay-backend")
 
@@ -39,6 +56,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(StripVercelBackendPrefixMiddleware)
 
 LRCLIB_BASE = "https://lrclib.net/api"
 LRCLIB_HEADERS = {"User-Agent": "Wordplay/1.0 (https://github.com/wordplay-app)"}
