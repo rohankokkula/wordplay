@@ -395,6 +395,8 @@ def download_youtube_audio(url: str) -> tuple[Path, str]:
 _HEALTH_CACHE_MONO: float = 0.0
 _HEALTH_CACHE_PAYLOAD: dict | None = None
 _HEALTH_TTL_SEC = 90.0
+# “Me at the zoo” — used for /health load probe only when the search hit triggers a bot wall.
+_HEALTH_CANONICAL_PROBE_URL = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
 
 
 def _health_storage_writable() -> tuple[bool, str | None]:
@@ -405,6 +407,43 @@ def _health_storage_writable() -> tuple[bool, str | None]:
         return True, None
     except OSError as e:
         return False, str(e)
+
+
+def _health_ytdlp_extract_probe(url: str) -> tuple[bool, str | None]:
+    """
+    Same extractor rotation as real downloads — a single `android` client often hits
+    “Sign in to confirm…” on datacenter IPs while ios/mweb/tv_embedded may succeed.
+    """
+    u = url.strip()
+    last_err: str | None = None
+    for extractor_args in _yt_dlp_youtube_extractor_arg_attempts():
+        ydl_opts: dict = {
+            "quiet": True,
+            "no_warnings": True,
+            "no_color": True,
+            "noplaylist": True,
+            "skip_download": True,
+            "format": "bestaudio/best",
+            "extractor_args": extractor_args,
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(u, download=False)
+        except Exception as e:
+            last_err = str(e)
+            continue
+
+        if not info:
+            last_err = "no metadata"
+            continue
+        if info.get("url"):
+            return True, None
+        fmts = info.get("formats")
+        if isinstance(fmts, list) and fmts:
+            return True, None
+        last_err = "no playable formats"
+
+    return False, last_err or "yt-dlp extract failed for all player clients"
 
 
 def health_probe_load(url: str) -> tuple[bool, str | None]:
@@ -430,25 +469,7 @@ def health_probe_load(url: str) -> tuple[bool, str | None]:
                     except Exception:
                         continue
 
-        ydl_opts: dict = {
-            "quiet": True,
-            "no_warnings": True,
-            "no_color": True,
-            "noplaylist": True,
-            "skip_download": True,
-            "format": "bestaudio/best",
-            "extractor_args": {"youtube": {"player_client": ["android"]}},
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(u, download=False)
-        if not info:
-            return False, "no metadata"
-        if info.get("url"):
-            return True, None
-        fmts = info.get("formats")
-        if isinstance(fmts, list) and fmts:
-            return True, None
-        return False, "no playable formats"
+        return _health_ytdlp_extract_probe(u)
     except Exception as e:
         return False, str(e)
 
@@ -487,6 +508,7 @@ def health_check_payload(force_refresh: bool = False) -> dict:
     probe_url: str | None = None
     load_ok = False
     load_err: str | None = None
+    canonical_fallback_used = False
     if search_ok and results:
         first = results[0]
         probe_url = first.get("link") or first.get("url") or (
@@ -494,6 +516,13 @@ def health_check_payload(force_refresh: bool = False) -> dict:
         )
         if probe_url:
             load_ok, load_err = health_probe_load(probe_url)
+            if (
+                not load_ok
+                and load_err
+                and _is_youtube_bot_challenge(load_err)
+            ):
+                load_ok, load_err = health_probe_load(_HEALTH_CANONICAL_PROBE_URL)
+                canonical_fallback_used = bool(load_ok)
         else:
             load_err = "no url in search result"
     else:
@@ -509,6 +538,8 @@ def health_check_payload(force_refresh: bool = False) -> dict:
                 "ok": load_ok,
                 "error": load_err,
                 "probe_url": probe_url,
+                "canonical_fallback_used": canonical_fallback_used,
+                "canonical_probe_url": _HEALTH_CANONICAL_PROBE_URL if canonical_fallback_used else None,
             },
         },
         "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
