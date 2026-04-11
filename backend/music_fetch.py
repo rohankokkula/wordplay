@@ -16,6 +16,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
+from datetime import datetime, timezone
 import shutil
 import uuid
 from pathlib import Path
@@ -386,3 +388,133 @@ def download_youtube_audio(url: str) -> tuple[Path, str]:
     if not safe.lower().endswith(out_path.suffix.lower()):
         safe = f"{safe}{out_path.suffix}"
     return out_path, safe
+
+
+# ── Health probes (used by GET /health) ─────────────────────────────────
+
+_HEALTH_CACHE_MONO: float = 0.0
+_HEALTH_CACHE_PAYLOAD: dict | None = None
+_HEALTH_TTL_SEC = 90.0
+
+
+def _health_storage_writable() -> tuple[bool, str | None]:
+    try:
+        probe = MUSIC_DIR / ".health_probe_write"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True, None
+    except OSError as e:
+        return False, str(e)
+
+
+def health_probe_load(url: str) -> tuple[bool, str | None]:
+    """
+    Verify the same paths as a real download (formats + decipherable URL, or yt-dlp extract),
+    without writing a full media file.
+    """
+    u = url.strip()
+    if not _allowed_youtube_url(u):
+        return False, "invalid url"
+
+    try:
+        video = Video.get(u)
+        if video and isinstance(video, dict):
+            cands = _audio_format_candidates(video)
+            if cands:
+                fetcher = _get_stream_fetcher()
+                for itag, _mime, _br in cands[:12]:
+                    try:
+                        stream_url = fetcher.get(video, itag)
+                        if stream_url and stream_url.startswith("http"):
+                            return True, None
+                    except Exception:
+                        continue
+
+        ydl_opts: dict = {
+            "quiet": True,
+            "no_warnings": True,
+            "no_color": True,
+            "noplaylist": True,
+            "skip_download": True,
+            "format": "bestaudio/best",
+            "extractor_args": {"youtube": {"player_client": ["android"]}},
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(u, download=False)
+        if not info:
+            return False, "no metadata"
+        if info.get("url"):
+            return True, None
+        fmts = info.get("formats")
+        if isinstance(fmts, list) and fmts:
+            return True, None
+        return False, "no playable formats"
+    except Exception as e:
+        return False, str(e)
+
+
+def health_check_payload(force_refresh: bool = False) -> dict:
+    """
+    Run storage + YouTube search + load pipeline checks.
+    Results are cached for ~90s to avoid hammering YouTube on frequent probes.
+    """
+    global _HEALTH_CACHE_MONO, _HEALTH_CACHE_PAYLOAD
+
+    now_m = time.monotonic()
+    if (
+        not force_refresh
+        and _HEALTH_CACHE_PAYLOAD is not None
+        and (now_m - _HEALTH_CACHE_MONO) < _HEALTH_TTL_SEC
+    ):
+        out = dict(_HEALTH_CACHE_PAYLOAD)
+        out["cached"] = True
+        return out
+
+    storage_ok, storage_err = _health_storage_writable()
+
+    search_ok = False
+    search_err: str | None = None
+    results: list[dict] = []
+    try:
+        results = search_youtube("music", limit=1)
+        if not results:
+            search_err = "empty results"
+        else:
+            search_ok = True
+    except Exception as e:
+        search_err = str(e)
+
+    probe_url: str | None = None
+    load_ok = False
+    load_err: str | None = None
+    if search_ok and results:
+        first = results[0]
+        probe_url = first.get("link") or first.get("url") or (
+            f"https://www.youtube.com/watch?v={first.get('id')}" if first.get("id") else None
+        )
+        if probe_url:
+            load_ok, load_err = health_probe_load(probe_url)
+        else:
+            load_err = "no url in search result"
+    else:
+        load_err = "skipped (search did not return a video)"
+
+    status = "ok" if storage_ok and search_ok and load_ok else "degraded"
+    payload = {
+        "status": status,
+        "checks": {
+            "storage": {"ok": storage_ok, "error": storage_err},
+            "search": {"ok": search_ok, "error": search_err},
+            "load": {
+                "ok": load_ok,
+                "error": load_err,
+                "probe_url": probe_url,
+            },
+        },
+        "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "cache_ttl_seconds": int(_HEALTH_TTL_SEC),
+        "cached": False,
+    }
+    _HEALTH_CACHE_MONO = now_m
+    _HEALTH_CACHE_PAYLOAD = payload
+    return dict(payload)

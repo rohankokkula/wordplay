@@ -2,7 +2,7 @@
 wordplay-backend — FastAPI server.
 
 Endpoints:
-  GET  /health — liveness check
+  GET  /health — liveness + optional YouTube search/load probes (see query params)
   GET  /api/music/search — YouTube search
   POST /api/music/download — download audio from a YouTube URL
   GET  /api/lyrics/search — proxy to LRCLib for synced lyrics
@@ -27,7 +27,7 @@ from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from music_fetch import download_youtube_audio, search_youtube
+from music_fetch import download_youtube_audio, health_check_payload, search_youtube
 
 logger = logging.getLogger("wordplay")
 
@@ -49,8 +49,29 @@ def _lrc_client() -> httpx.AsyncClient:
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok"}
+async def health(
+    quick: bool = Query(
+        False,
+        description="If true, only returns basic liveness (no YouTube calls).",
+    ),
+    force: bool = Query(
+        False,
+        description="If true, bypasses the short-lived cache for YouTube probes.",
+    ),
+):
+    """
+    Liveness plus, by default, checks that match real usage:
+
+    - **storage** — music cache directory is writable (needed for downloads).
+    - **search** — one real `VideosSearch` query (same stack as `/api/music/search`).
+    - **load** — for the first search hit, verifies stream metadata / decipher / yt-dlp
+      extract (same paths as download, without saving a full file).
+
+    Probes are cached ~90s to avoid hammering YouTube. Use `quick=1` for cheap pings.
+    """
+    if quick:
+        return {"status": "ok", "checks": {"mode": "quick"}}
+    return await asyncio.to_thread(health_check_payload, force)
 
 
 class MusicDownloadBody(BaseModel):
