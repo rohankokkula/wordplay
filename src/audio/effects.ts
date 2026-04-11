@@ -1,13 +1,10 @@
-import { getAudioContext, setMusicLowCut } from './mixer';
-import { createReverbIR } from './djSfx';
+import { getAudioContext } from './mixer';
 
 export interface FXChain {
   input: GainNode;
   output: GainNode;
   filterNode: BiquadFilterNode;
   highpassNode: BiquadFilterNode;
-  genreEQ: BiquadFilterNode;
-  subBoost: BiquadFilterNode;
   analyser: AnalyserNode;
   reverbSend: GainNode;
   reverbDry: GainNode;
@@ -15,6 +12,19 @@ export interface FXChain {
 }
 
 let chain: FXChain | null = null;
+
+export function createReverbIR(decaySec: number, durationSec: number): AudioBuffer {
+  const ac = getAudioContext();
+  const len = Math.floor(ac.sampleRate * durationSec);
+  const buf = ac.createBuffer(2, len, ac.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = buf.getChannelData(ch);
+    for (let i = 0; i < len; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp((-3 * i) / (ac.sampleRate * decaySec));
+    }
+  }
+  return buf;
+}
 
 export function initFXChain(): FXChain {
   if (chain) return chain;
@@ -37,17 +47,6 @@ export function initFXChain(): FXChain {
   highpassNode.frequency.value = 20;
   highpassNode.Q.value = 0.7;
 
-  const genreEQ = ac.createBiquadFilter();
-  genreEQ.type = 'lowshelf';
-  genreEQ.frequency.value = 250;
-  genreEQ.gain.value = 0;
-
-  const subBoost = ac.createBiquadFilter();
-  subBoost.type = 'peaking';
-  subBoost.frequency.value = 65;
-  subBoost.Q.value = 1.2;
-  subBoost.gain.value = 0;
-
   const reverbDry = ac.createGain();
   reverbDry.gain.value = 1;
 
@@ -60,23 +59,19 @@ export function initFXChain(): FXChain {
   const reverbReturn = ac.createGain();
   reverbReturn.gain.value = 0.7;
 
-  // Chain: input → lowpass → highpass → genreEQ → subBoost → [dry + wet reverb] → output → analyser
   input.connect(filterNode);
   filterNode.connect(highpassNode);
-  highpassNode.connect(genreEQ);
-  genreEQ.connect(subBoost);
-
-  subBoost.connect(reverbDry);
+  highpassNode.connect(reverbDry);
   reverbDry.connect(output);
 
-  subBoost.connect(reverbSend);
+  highpassNode.connect(reverbSend);
   reverbSend.connect(convolver);
   convolver.connect(reverbReturn);
   reverbReturn.connect(output);
 
   output.connect(analyser);
 
-  chain = { input, output, filterNode, highpassNode, genreEQ, subBoost, analyser, reverbSend, reverbDry, convolver };
+  chain = { input, output, filterNode, highpassNode, analyser, reverbSend, reverbDry, convolver };
   return chain;
 }
 
@@ -143,28 +138,13 @@ export function setReverbSend(wetGain: number, rampSec = 0.1) {
 export function resetAllFX() {
   const ac = getAudioContext();
   const now = ac.currentTime;
-  const { filterNode, highpassNode, genreEQ, subBoost, reverbSend, reverbDry } = getFXChain();
+  const { filterNode, highpassNode, reverbSend, reverbDry } = getFXChain();
   filterNode.frequency.cancelScheduledValues(now);
   filterNode.frequency.setValueAtTime(20000, now);
   highpassNode.frequency.cancelScheduledValues(now);
   highpassNode.frequency.setValueAtTime(20, now);
-  genreEQ.gain.cancelScheduledValues(now);
-  genreEQ.gain.setValueAtTime(0, now);
-  subBoost.gain.cancelScheduledValues(now);
-  subBoost.gain.setValueAtTime(0, now);
   reverbSend.gain.cancelScheduledValues(now);
   reverbSend.gain.setValueAtTime(0, now);
   reverbDry.gain.cancelScheduledValues(now);
   reverbDry.gain.setValueAtTime(1, now);
-  setMusicLowCut(20, 0.05);
-}
-
-export function setGenreEQ(gainDb: number, subBoostDb = 0) {
-  const ac = getAudioContext();
-  const now = ac.currentTime;
-  const { genreEQ, subBoost } = getFXChain();
-  genreEQ.gain.cancelScheduledValues(now);
-  genreEQ.gain.setTargetAtTime(gainDb, now, 0.05);
-  subBoost.gain.cancelScheduledValues(now);
-  subBoost.gain.setTargetAtTime(subBoostDb, now, 0.05);
 }

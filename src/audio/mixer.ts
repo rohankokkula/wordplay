@@ -1,14 +1,10 @@
 /**
- * Web Audio mixer graph with FX bus.
+ * Web Audio mixer graph.
  *
  * Routing:
- *   source{A,B} → volumeNode{A,B} → duckNode → gainNode{A,B} ─┐
- *   beatBus (genre drums) ─────────────────────────────────────┤
- *                                                               ├→ fxChain.input → fxChain.output → masterGain → destination
- *   sfxGain (turntable SFX only — not genre drums) ───────────→ masterGain
- *
- * beatBus goes through the FX chain so filter sweeps + EQ affect drums equally.
- * duckNode on the music path allows sidechain-style ducking from kick hits.
+ *   source{A,B} → volumeNode → EQ(low/mid/high) → duckNode → crossfadeGain → fxChain.input
+ *   fxChain.output → masterGain → destination
+ *   sfxGain → masterGain (bypasses FX)
  */
 
 import { initFXChain, type FXChain } from './effects';
@@ -24,11 +20,8 @@ let gainA: GainNode;
 let gainB: GainNode;
 let duckNodeA: GainNode;
 let duckNodeB: GainNode;
-let musicLowCutA: BiquadFilterNode;
-let musicLowCutB: BiquadFilterNode;
 let masterGain: GainNode;
 let sfxGain: GainNode;
-let beatBus: GainNode;
 let fxChain: FXChain;
 let eqA: DeckEQ;
 let eqB: DeckEQ;
@@ -83,35 +76,17 @@ export function initMixer() {
   sfxGain = ac.createGain();
   sfxGain.gain.value = 0.9;
 
-  beatBus = ac.createGain();
-  beatBus.gain.value = 1;
-
   eqA = createDeckEQ(ac);
   eqB = createDeckEQ(ac);
 
-  musicLowCutA = ac.createBiquadFilter();
-  musicLowCutA.type = 'highpass';
-  musicLowCutA.frequency.value = 20;
-  musicLowCutA.Q.value = 0.707;
-
-  musicLowCutB = ac.createBiquadFilter();
-  musicLowCutB.type = 'highpass';
-  musicLowCutB.frequency.value = 20;
-  musicLowCutB.Q.value = 0.707;
-
   fxChain = initFXChain();
 
-  // Music path: volumeNode → eqLow → eqMid → eqHigh → lowCut → duckNode → crossfade gain → FX chain
-  eqA.high.connect(musicLowCutA);
-  eqB.high.connect(musicLowCutB);
-  musicLowCutA.connect(duckNodeA);
-  musicLowCutB.connect(duckNodeB);
+  eqA.high.connect(duckNodeA);
+  eqB.high.connect(duckNodeB);
   duckNodeA.connect(gainA);
   duckNodeB.connect(gainB);
   gainA.connect(fxChain.input);
   gainB.connect(fxChain.input);
-
-  beatBus.connect(fxChain.input);
 
   fxChain.output.connect(masterGain);
   sfxGain.connect(masterGain);
@@ -120,10 +95,7 @@ export function initMixer() {
   _initialized = true;
 }
 
-/**
- * Entry point for deck audio sources.
- * Sources should connect here → goes through per-deck EQ → duck → crossfade → FX.
- */
+/** Entry point for deck audio — connects into EQ → duck → crossfade → FX. */
 export function getGainNode(deck: 'A' | 'B'): GainNode {
   initMixer();
   return deck === 'A' ? eqA.low : eqB.low;
@@ -144,6 +116,7 @@ export function getAnalyser(): AnalyserNode {
   return fxChain.analyser;
 }
 
+/** Constant-power crossfade: 0 = full A, 1 = full B. */
 export function setCrossfader(position: number) {
   initMixer();
   const theta = position * Math.PI * 0.5;
@@ -158,29 +131,6 @@ export function setMasterVolume(volume: number) {
   masterGain.gain.setTargetAtTime(volume, now, 0.02);
 }
 
-/** Beat bus — genre drums route here (goes through FX chain with the music). */
-export function getBeatBus(): GainNode {
-  initMixer();
-  return beatBus;
-}
-
-/**
- * Carve the track's sub-bass to make room for genre kick.
- * Set freqHz > 20 to activate (e.g. 80-120 Hz); set to 20 to bypass.
- */
-export function setMusicLowCut(freqHz: number, rampSec = 0.08) {
-  initMixer();
-  const ac = getAudioContext();
-  const now = ac.currentTime;
-  const target = Math.max(20, Math.min(500, freqHz));
-  for (const f of [musicLowCutA, musicLowCutB]) {
-    f.frequency.cancelScheduledValues(now);
-    f.frequency.setValueAtTime(f.frequency.value, now);
-    f.frequency.linearRampToValueAtTime(target, now + rampSec);
-  }
-}
-
-/** One-shot UI SFX only (turntable wind-down etc) — bypasses FX chain. */
 export function getSfxInput(): GainNode {
   initMixer();
   return sfxGain;

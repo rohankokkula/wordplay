@@ -12,6 +12,8 @@ FastAPI service powering Wordplay's YouTube search, audio download, lyrics proxy
 
 ## Quick Start
 
+From the `backend/` directory (this folder in the repo):
+
 ```bash
 cd backend
 python -m venv .venv
