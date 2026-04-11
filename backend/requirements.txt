@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+# Used by youtubesearchpython.StreamURLFetcher for signature / n-parameter decipher (not called from our code).
+yt-dlp>=2025.10.22
+yt-search-python>=2.0.0
+httpx
+faster-whisper
