@@ -1,4 +1,4 @@
-# Render Blueprint — wordplay-backend (FastAPI + yt-dlp)
+# Render Blueprint — wordplay-backend (FastAPI + yt-search-python)
 # https://render.com/docs/infrastructure-as-code
 #
 # Install ffmpeg on the host if you need transcoding (not included in default Python env).
@@ -9,8 +9,7 @@ services:
     runtime: python
     region: oregon
     plan: free
-    # Omit rootDir when main.py and requirements.txt are at the repo root (e.g. wordplay-backend).
-    # Monorepo: set rootDir: backend
+    rootDir: backend
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health

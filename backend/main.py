@@ -27,7 +27,7 @@ from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from music_fetch import download_youtube_audio, search_youtube, MUSIC_DIR
+from music_fetch import download_youtube_audio, search_youtube
 
 logger = logging.getLogger("wordplay")
 

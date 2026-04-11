@@ -1,6 +1,6 @@
 # wordplay-backend
 
-FastAPI service for YouTube search and audio download used by the Wordplay web app. It uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) for search and fetch; **ffmpeg** on the host is strongly recommended so outputs can be transcoded (e.g. to MP3).
+FastAPI service for YouTube search and audio download used by the Wordplay web app. **Search** uses [yt-search-python](https://pypi.org/project/yt-search-python/) (`VideosSearch`). **Download** uses the same library (`Video` + `StreamURLFetcher`) to resolve direct stream URLs, then downloads bytes with **httpx**; `yt-dlp` is still installed because `StreamURLFetcher` uses it internally for YouTube signature decipher only (this app does not call `YoutubeDL` for extraction). **ffmpeg** on the host is optional (no longer required for the default download path).
 
 ## Requirements
 

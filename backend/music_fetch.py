@@ -1,23 +1,25 @@
 """
 Search and download audio for Wordplay.
 
-Search: youtubesearchpython (no API key, no cookies).
-Download: yt-dlp (robust, handles format negotiation + ffmpeg conversion).
-Requires ffmpeg for MP3 conversion (brew install ffmpeg).
+Search: youtubesearchpython (yt-search-python) — VideosSearch, no API key.
+Download: Video.get + StreamURLFetcher (same library) for direct stream URLs, then httpx.
+  StreamURLFetcher uses yt-dlp internally for signature / n-parameter decipher only — we do not
+  invoke YoutubeDL for extraction or postprocessing.
 
-Only YouTube watch URLs are accepted for download (SSRF-safe).
+Paste-a-URL flows send a normalized watch URL to POST /api/music/download; validation matches
+the frontend (http(s) YouTube hosts only).
 """
 
 from __future__ import annotations
 
 import logging
 import re
-import shutil
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
-import yt_dlp
+import httpx
+from youtubesearchpython import StreamURLFetcher, Video, VideosSearch
 
 logger = logging.getLogger(__name__)
 
@@ -26,30 +28,48 @@ MUSIC_DIR.mkdir(parents=True, exist_ok=True)
 
 _SAFE_NAME = re.compile(r"[^a-zA-Z0-9._\- ()\[\]]+")
 
+_stream_fetcher: StreamURLFetcher | None = None
 
-def _ffmpeg_bin_dir() -> str | None:
-    """Find ffmpeg directory for yt-dlp."""
-    import os
-    env = os.environ.get("FFMPEG_LOCATION", "").strip()
-    if env:
-        p = Path(env)
-        if p.is_file():
-            return str(p.parent)
-        if p.is_dir() and (p / "ffmpeg").exists():
-            return str(p)
-    which = shutil.which("ffmpeg")
-    if which:
-        return str(Path(which).resolve().parent)
-    for d in ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"):
-        if (Path(d) / "ffmpeg").exists():
-            return d
-    return None
+
+def _get_stream_fetcher() -> StreamURLFetcher:
+    """Library recommends a single StreamURLFetcher instance."""
+    global _stream_fetcher
+    if _stream_fetcher is None:
+        _stream_fetcher = StreamURLFetcher()
+    return _stream_fetcher
+
+
+def _suffix_for_mime(mime: str) -> str:
+    base = (mime or "").lower().split(";")[0].strip()
+    if base == "audio/mp4":
+        return ".m4a"
+    if base == "audio/webm":
+        return ".webm"
+    if base == "audio/opus" or "opus" in mime.lower():
+        return ".opus"
+    return ".bin"
+
+
+def _audio_format_candidates(video: dict) -> list[tuple[int, str, float]]:
+    """(itag, mimeType, bitrate) sorted by bitrate descending."""
+    sd = video.get("streamingData") or {}
+    adaptive = sd.get("adaptiveFormats") or []
+    out: list[tuple[int, str, float]] = []
+    for f in adaptive:
+        mime = f.get("mimeType") or ""
+        if "audio" not in mime.lower():
+            continue
+        itag = f.get("itag")
+        if itag is None:
+            continue
+        br = float(f.get("bitrate") or 0)
+        out.append((int(itag), mime, br))
+    out.sort(key=lambda x: -x[2])
+    return out
 
 
 def search_youtube(query: str, limit: int = 8) -> list[dict]:
     """Search YouTube via youtubesearchpython (no API key, no cookies)."""
-    from youtubesearchpython import VideosSearch
-
     q = query.strip()
     if len(q) < 2:
         return []
@@ -109,81 +129,65 @@ def _allowed_youtube_url(url: str) -> bool:
     return False
 
 
-def _pick_audio_file(token: str) -> Path | None:
-    matches = list(MUSIC_DIR.glob(f"{token}.*"))
-    audio = [
-        p for p in matches
-        if p.suffix.lower() in (".mp3", ".m4a", ".opus", ".webm", ".ogg", ".aac", ".flac")
-    ]
-    return audio[0] if audio else None
-
-
 def download_youtube_audio(url: str) -> tuple[Path, str]:
-    """Download audio from YouTube. Returns (file_path, safe_filename)."""
+    """Resolve best audio stream via Video + StreamURLFetcher, download with httpx."""
     if not _allowed_youtube_url(url):
         raise ValueError("Only http(s) YouTube watch URLs are allowed")
 
-    ffmpeg_dir = _ffmpeg_bin_dir()
-    title = "track"
-    last_err: Exception | None = None
+    video = Video.get(url.strip())
+    if not video or not isinstance(video, dict):
+        raise ValueError("Video unavailable, private, or invalid URL")
 
-    for use_postprocessor in (True, False):
-        token = uuid.uuid4().hex[:16]
-        out_template = str(MUSIC_DIR / f"{token}.%(ext)s")
-        ydl_opts: dict = {
-            "outtmpl": out_template,
-            "quiet": True,
-            "no_warnings": True,
-            "no_color": True,
-        }
-        if ffmpeg_dir:
-            ydl_opts["ffmpeg_location"] = ffmpeg_dir
+    title = (video.get("title") or "track").strip() or "track"
+    candidates = _audio_format_candidates(video)
+    if not candidates:
+        raise RuntimeError("No audio streams reported for this video.")
 
-        if use_postprocessor:
-            ydl_opts["format"] = "bestaudio*/best"
-            ydl_opts["postprocessors"] = [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }]
-        else:
-            ydl_opts["format"] = "bestaudio*/best"
-
+    fetcher = _get_stream_fetcher()
+    stream_url: str | None = None
+    mime_used = "audio/m4a"
+    for itag, mime, _br in candidates[:12]:
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                if info is None:
-                    raise RuntimeError("Download produced no video metadata.")
-                title = (info.get("title") or "track").strip() or "track"
+            stream_url = fetcher.get(video, itag)
         except Exception as e:
-            last_err = e
-            err_s = str(e).lower()
-            if use_postprocessor and ("ffmpeg" in err_s or "ffprobe" in err_s):
-                for p in MUSIC_DIR.glob(f"{token}.*"):
-                    try:
-                        p.unlink()
-                    except OSError:
-                        pass
-                continue
-            raise RuntimeError(str(e)) from e
+            logger.debug("StreamURLFetcher failed for itag %s: %s", itag, e)
+            stream_url = None
+        if stream_url:
+            mime_used = mime
+            break
 
-        path = MUSIC_DIR / f"{token}.mp3"
-        if not path.is_file():
-            path = _pick_audio_file(token) or path
-        if not path.is_file():
-            if use_postprocessor:
-                for p in MUSIC_DIR.glob(f"{token}.*"):
-                    try:
-                        p.unlink()
-                    except OSError:
-                        pass
-                continue
-            raise RuntimeError("Download finished but no audio file was produced.")
+    if not stream_url:
+        raise RuntimeError(
+            "Could not resolve a playable audio URL (YouTube may have changed formats; "
+            "ensure yt-dlp is installed for signature support)."
+        )
 
-        safe = _SAFE_NAME.sub("_", title)[:120].strip("._") or "track"
-        if not safe.lower().endswith(path.suffix.lower()):
-            safe = f"{safe}{path.suffix}"
-        return path, safe
+    token = uuid.uuid4().hex[:16]
+    suffix = _suffix_for_mime(mime_used)
+    out_path = MUSIC_DIR / f"{token}{suffix}"
 
-    msg = str(last_err) if last_err else "unknown error"
-    raise RuntimeError(f"{msg}\nInstall ffmpeg: brew install ffmpeg")
+    try:
+        with httpx.Client(timeout=httpx.Timeout(600.0), follow_redirects=True) as client:
+            with client.stream("GET", stream_url) as resp:
+                resp.raise_for_status()
+                with open(out_path, "wb") as f:
+                    for chunk in resp.iter_bytes(chunk_size=256 * 1024):
+                        f.write(chunk)
+    except Exception:
+        try:
+            out_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+    if not out_path.is_file() or out_path.stat().st_size < 1024:
+        try:
+            out_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise RuntimeError("Download produced an empty or truncated file.")
+
+    safe = _SAFE_NAME.sub("_", title)[:120].strip("._") or "track"
+    if not safe.lower().endswith(out_path.suffix.lower()):
+        safe = f"{safe}{out_path.suffix}"
+    return out_path, safe
