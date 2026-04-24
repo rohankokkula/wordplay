@@ -20,12 +20,10 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-me")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = 72
-INVITE_CODE = os.environ.get("INVITE_CODE", "soberohan")
 
 
 class GoogleLoginRequest(BaseModel):
     id_token: str
-    invite_code: str
 
 
 class TokenResponse(BaseModel):
@@ -50,9 +48,6 @@ def _decode_jwt(token: str) -> dict:
 
 
 async def google_login(body: GoogleLoginRequest) -> TokenResponse:
-    if body.invite_code.strip().lower() != INVITE_CODE.lower():
-        raise HTTPException(403, "Invalid invite code")
-
     try:
         idinfo = google_id_token.verify_oauth2_token(
             body.id_token,

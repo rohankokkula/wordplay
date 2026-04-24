@@ -3,7 +3,7 @@ wordplay-backend — FastAPI server.
 
 Endpoints:
   GET  /health
-  POST /api/auth/google — Google ID-token login + invite code
+  POST /api/auth/google — Google ID-token login
   GET  /api/auth/me — current user from JWT
   GET  /api/music/search — YouTube search (gated by ALLOW_YOUTUBE_API)
   POST /api/music/download — download audio from a YouTube URL (gated)
@@ -24,6 +24,7 @@ import asyncio
 import logging
 import os
 import tempfile
+import tomllib
 
 import httpx
 from pydantic import BaseModel, Field
@@ -37,12 +38,25 @@ from wordplay_auth import GoogleLoginRequest, google_login, get_current_user
 from db import init_db
 from playlist import router as playlist_router
 from community import router as community_router
+from social import router as social_router
+from stems import router as stems_router
 
 logger = logging.getLogger("wordplay")
 
 ALLOW_YOUTUBE_API = os.environ.get("ALLOW_YOUTUBE_API", "false").strip().lower() in ("1", "true", "yes")
 
-app = FastAPI(title="wordplay-backend")
+
+def _read_version() -> str:
+    try:
+        with open(Path(__file__).resolve().parent / "pyproject.toml", "rb") as f:
+            return tomllib.load(f)["project"]["version"]
+    except Exception:
+        return "0.0.0"
+
+
+APP_VERSION = _read_version()
+
+app = FastAPI(title="wordplay-backend", version=APP_VERSION)
 
 
 def _cors_params() -> dict:
@@ -78,6 +92,8 @@ app.add_middleware(
 
 app.include_router(playlist_router)
 app.include_router(community_router)
+app.include_router(social_router)
+app.include_router(stems_router)
 
 
 @app.on_event("startup")
@@ -95,7 +111,13 @@ def _lrc_client() -> httpx.AsyncClient:
 @app.get("/api/ping")
 async def api_ping():
     """Use this to confirm the deployed service is this FastAPI app (`GET` returns JSON). If this 404s, Railway is running the wrong build or root directory."""
-    return {"service": "wordplay-backend", "ok": True}
+    return {"service": "wordplay-backend", "ok": True, "version": APP_VERSION}
+
+
+@app.get("/api/version")
+async def api_version():
+    """Current deployed version. Exposed so the frontend can display it in Settings / footer."""
+    return {"version": APP_VERSION, "name": "wordplay-backend"}
 
 
 @app.get("/health")

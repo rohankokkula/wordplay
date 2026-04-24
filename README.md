@@ -29,7 +29,10 @@
   <img src="https://img.shields.io/badge/yt--dlp-2026-red?logo=youtube&logoColor=white" alt="yt-dlp" />
   <img src="https://img.shields.io/badge/whisper-base-blueviolet" alt="Whisper" />
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License" />
+  <img src="https://img.shields.io/badge/version-1.1.0-6e5dbb" alt="v1.1.0" />
 </p>
+
+> **v1.1.0 — Social mix studio.** Wordplay is now a two-sided product: create a mix on the node-based ReactFlow canvas (vocal + instrument stems via Demucs, swappable instrument beds, color-coded FX edges), then publish, share, like, comment, follow, and remix on the public feed. Mobile-first shadcn UI, motion.dev springs everywhere, 4 themes, invite-free Google login, and automated semver via release-please. See [`CHANGELOG.md`](CHANGELOG.md) for details.
 
 ---
 

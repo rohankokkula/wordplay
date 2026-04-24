@@ -81,7 +81,6 @@ If `/api/ping` works but **`POST /api/auth/google`** still 404, you are on a **s
 | `DATABASE_URL` | Yes (prod) | PostgreSQL connection string (Railway injects this) |
 | `JWT_SECRET` | Yes (prod) | Secret for signing JWTs |
 | `GOOGLE_CLIENT_ID` | Yes | Google OAuth Web Client ID |
-| `INVITE_CODE` | No | Defaults to `soberohan` |
 | `UPLOAD_ROOT` | No | Volume mount path on Railway (default locally: `backend/upload_data/`) |
 | `ALLOW_YOUTUBE_API` | No | `true` to enable YouTube routes (default `false`) |
 | `MUSIC_CACHE_DIR` | No | Override music cache directory |

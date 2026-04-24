@@ -46,32 +46,20 @@ html {
   background: var(--bg);
 }
 
+/*
+  Page-level sizing. Historically we locked body/#root to 100dvh with
+  overflow:hidden to build a fixed DJ console that never scrolled. v1.1
+  routes (login, feed, settings, profile, post) are document-style pages
+  that expect natural vertical scroll, so we let them flow. The studio
+  still renders its own 100dvh shell with internal scroll, so this is safe.
+*/
 body {
-  height: 100dvh;
-  max-height: 100dvh;
-  overflow: hidden;
+  min-height: 100dvh;
 }
 
 #root {
-  height: 100dvh;
-  max-height: 100dvh;
-  overflow: hidden;
-}
-
-#root:has(.home-page),
-#root:has(.wp-dash) {
-  height: auto;
   min-height: 100dvh;
-  max-height: none;
-  overflow: auto;
-}
-
-body:has(.home-page),
-body:has(.wp-dash) {
-  overflow: auto;
-  max-height: none;
-  height: auto;
-  min-height: 100dvh;
+  isolation: isolate;
 }
 
 /* ===== GLOBAL FOCUS ===== */
@@ -1819,6 +1807,25 @@ input[type="range"]::-moz-range-thumb {
   flex-shrink: 0;
   margin-top: auto;
   padding-top: 12px;
+}
+
+.app-sidebar-account__version {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 4px 8px;
+}
+
+.wordplay-version-badge {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.03em;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: help;
 }
 
 .app-sidebar-account__row {

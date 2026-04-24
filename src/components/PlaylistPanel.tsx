@@ -1,402 +1,376 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { GoogleLogin, type CredentialResponse } from '@react-oauth/google';
-import {
-  ActionIcon,
-  Avatar,
-  Badge,
-  Button,
-  Card,
-  FileButton,
-  Group,
-  ScrollArea,
-  Stack,
-  Text,
-  TextInput,
-} from '@mantine/core';
-import { IconMusic, IconPlus, IconTrash } from '@tabler/icons-react';
-import { googleLoginUiProps, googleSignInIdProps } from '../auth/googleSignInConfig';
-import { useAuth } from '../auth/AuthContext';
-import { apiUrl } from '../apiBase';
-import { WORDPLAYLIST_DRAG_MIME } from '../wordplaylistDrag';
-import './PlaylistPanel.css';
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { GoogleLogin, type CredentialResponse } from '@react-oauth/google'
+import { Music, Plus, Trash2, Loader2 } from 'lucide-react'
+import { motion, AnimatePresence } from 'motion/react'
+import { googleLoginUiProps, googleSignInIdProps } from '../auth/googleSignInConfig'
+import { useAuth } from '../auth/AuthContext'
+import { apiUrl } from '../apiBase'
+import { WORDPLAYLIST_DRAG_MIME } from '../wordplaylistDrag'
+import { Button } from './ui/button'
+import { cn } from '../lib/utils'
 
 export interface PlaylistItemRow {
-  id: string;
-  filename: string;
-  size_bytes: number;
-  duration_sec: number | null;
-  title: string | null;
-  artist: string | null;
-  bpm: number | null;
-  has_art: boolean;
-  created_at: string | null;
+  id: string
+  filename: string
+  size_bytes: number
+  duration_sec: number | null
+  title: string | null
+  artist: string | null
+  bpm: number | null
+  has_art: boolean
+  created_at: string | null
 }
 
 interface Props {
-  token: string | null;
-  onLoadFile: (file: File) => void;
+  token: string | null
+  onLoadFile: (file: File) => void
   /** When true, omit section title (used inside AppSidebarLeft card). */
-  embedded?: boolean;
+  embedded?: boolean
 }
 
 async function readErrorDetail(res: Response): Promise<string> {
   try {
-    const data = await res.json();
-    const d = data?.detail;
-    if (typeof d === 'string') return d;
-    if (Array.isArray(d) && d[0]?.msg) return d.map((x: { msg: string }) => x.msg).join('; ');
+    const data = await res.json()
+    const d = data?.detail
+    if (typeof d === 'string') return d
+    if (Array.isArray(d) && d[0]?.msg) {
+      return d.map((x: { msg: string }) => x.msg).join('; ')
+    }
   } catch {
     /* ignore */
   }
-  return `Request failed (${res.status})`;
+  return `Request failed (${res.status})`
 }
 
 function fmtDuration(sec: number | null | undefined): string {
-  if (sec == null || !Number.isFinite(sec) || sec < 0) return '—';
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
+  if (sec == null || !Number.isFinite(sec) || sec < 0) return '—'
+  const m = Math.floor(sec / 60)
+  const s = Math.floor(sec % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-function PlaylistCover({ itemId, hasArt, token }: { itemId: string; hasArt: boolean; token: string | null }) {
-  const [src, setSrc] = useState<string | null>(null);
-  const urlRef = useRef<string | null>(null);
+function PlaylistCover({
+  itemId,
+  hasArt,
+  token,
+}: {
+  itemId: string
+  hasArt: boolean
+  token: string | null
+}) {
+  const [src, setSrc] = useState<string | null>(null)
+  const urlRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!hasArt || !token) {
       if (urlRef.current) {
-        URL.revokeObjectURL(urlRef.current);
-        urlRef.current = null;
+        URL.revokeObjectURL(urlRef.current)
+        urlRef.current = null
       }
-      setSrc(null);
-      return;
+      setSrc(null)
+      return
     }
-
-    const ac = new AbortController();
-
+    const ac = new AbortController()
     fetch(apiUrl(`/api/playlist/${itemId}/art`), {
       headers: { Authorization: `Bearer ${token}` },
       signal: ac.signal,
     })
       .then((r) => (r.ok ? r.blob() : null))
       .then((blob) => {
-        if (!blob || ac.signal.aborted) return;
-        if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-        const u = URL.createObjectURL(blob);
-        urlRef.current = u;
-        setSrc(u);
+        if (!blob || ac.signal.aborted) return
+        if (urlRef.current) URL.revokeObjectURL(urlRef.current)
+        const u = URL.createObjectURL(blob)
+        urlRef.current = u
+        setSrc(u)
       })
       .catch(() => {
         if (urlRef.current) {
-          URL.revokeObjectURL(urlRef.current);
-          urlRef.current = null;
+          URL.revokeObjectURL(urlRef.current)
+          urlRef.current = null
         }
-        setSrc(null);
-      });
-
+        setSrc(null)
+      })
     return () => {
-      ac.abort();
+      ac.abort()
       if (urlRef.current) {
-        URL.revokeObjectURL(urlRef.current);
-        urlRef.current = null;
+        URL.revokeObjectURL(urlRef.current)
+        urlRef.current = null
       }
-    };
-  }, [itemId, hasArt, token]);
+    }
+  }, [itemId, hasArt, token])
 
   return (
-    <Avatar src={src || undefined} alt="" radius="md" size={52} variant="light" color="violet">
-      {!src && <IconMusic size={22} stroke={1.5} aria-hidden />}
-    </Avatar>
-  );
+    <div className="relative h-11 w-11 rounded-lg overflow-hidden shrink-0 bg-[var(--wp-surface-3)] ring-1 ring-[var(--wp-border)] flex items-center justify-center">
+      {src ? (
+        <img src={src} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <Music className="h-4 w-4 text-[var(--wp-muted)]" />
+      )}
+    </div>
+  )
 }
 
 export function PlaylistPanel({ token, onLoadFile, embedded = false }: Props) {
-  const { loginWithGoogle } = useAuth();
-  const [inviteCode, setInviteCode] = useState('');
-  const [signInError, setSignInError] = useState('');
-  const [signingIn, setSigningIn] = useState(false);
+  const { loginWithGoogle } = useAuth()
+  const [signInError, setSignInError] = useState('')
+  const [signingIn, setSigningIn] = useState(false)
 
-  const [items, setItems] = useState<PlaylistItemRow[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [items, setItems] = useState<PlaylistItemRow[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [loadingId, setLoadingId] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const handlePlaylistGoogleSuccess = useCallback(
+  const handleSignIn = useCallback(
     async (response: CredentialResponse) => {
       if (!response.credential) {
-        setSignInError('Google sign-in failed — no credential returned');
-        return;
+        setSignInError('Google sign-in failed — no credential returned')
+        return
       }
-      if (!inviteCode.trim()) {
-        setSignInError('Enter your invite code first');
-        return;
-      }
-      setSigningIn(true);
-      setSignInError('');
+      setSigningIn(true)
+      setSignInError('')
       try {
-        await loginWithGoogle(response.credential, inviteCode.trim());
+        await loginWithGoogle(response.credential)
       } catch (e) {
-        setSignInError(e instanceof Error ? e.message : 'Login failed');
+        setSignInError(e instanceof Error ? e.message : 'Login failed')
       } finally {
-        setSigningIn(false);
+        setSigningIn(false)
       }
     },
-    [inviteCode, loginWithGoogle],
-  );
+    [loginWithGoogle],
+  )
 
   const headers = useCallback((): HeadersInit => {
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }, [token]);
+    return token ? { Authorization: `Bearer ${token}` } : {}
+  }, [token])
 
   const fetchItems = useCallback(async () => {
-    if (!token) return;
+    if (!token) return
     try {
-      const res = await fetch(apiUrl('/api/playlist'), { headers: headers() });
-      if (res.ok) setItems(await res.json());
+      const res = await fetch(apiUrl('/api/playlist'), { headers: headers() })
+      if (res.ok) setItems(await res.json())
     } catch {
       /* silent */
     }
-  }, [token, headers]);
+  }, [token, headers])
 
   useEffect(() => {
-    fetchItems();
-  }, [fetchItems]);
+    fetchItems()
+  }, [fetchItems])
 
   const uploadOne = useCallback(
     async (file: File) => {
-      const form = new FormData();
-      form.append('file', file);
+      const form = new FormData()
+      form.append('file', file)
       const res = await fetch(apiUrl('/api/playlist/upload'), {
         method: 'POST',
         headers: headers(),
         body: form,
-      });
-      if (!res.ok) {
-        throw new Error(await readErrorDetail(res));
-      }
+      })
+      if (!res.ok) throw new Error(await readErrorDetail(res))
     },
     [headers],
-  );
+  )
 
   const handleUploadFiles = useCallback(
-    async (files: File[] | null) => {
-      if (!token || !files?.length) return;
-      setUploading(true);
-      setUploadError(null);
+    async (files: File[]) => {
+      if (!token || !files.length) return
+      setUploading(true)
+      setUploadError(null)
       try {
-        for (const file of files) {
-          await uploadOne(file);
-        }
-        await fetchItems();
+        for (const file of files) await uploadOne(file)
+        await fetchItems()
       } catch (e) {
-        setUploadError(e instanceof Error ? e.message : 'Upload failed');
+        setUploadError(e instanceof Error ? e.message : 'Upload failed')
       } finally {
-        setUploading(false);
+        setUploading(false)
       }
     },
     [token, uploadOne, fetchItems],
-  );
+  )
 
   const handleLoad = useCallback(
     async (item: PlaylistItemRow) => {
-      if (!token) return;
-      setLoadingId(item.id);
+      if (!token) return
+      setLoadingId(item.id)
       try {
         const res = await fetch(apiUrl(`/api/playlist/${item.id}/file`), {
           headers: headers(),
-        });
-        if (!res.ok) return;
-        const blob = await res.blob();
-        const file = new File([blob], item.filename, { type: blob.type });
-        onLoadFile(file);
+        })
+        if (!res.ok) return
+        const blob = await res.blob()
+        const file = new File([blob], item.filename, { type: blob.type })
+        onLoadFile(file)
       } finally {
-        setLoadingId(null);
+        setLoadingId(null)
       }
     },
     [token, headers, onLoadFile],
-  );
+  )
 
   const handleDelete = useCallback(
     async (id: string) => {
-      if (!token) return;
+      if (!token) return
       await fetch(apiUrl(`/api/playlist/${id}`), {
         method: 'DELETE',
         headers: headers(),
-      });
-      await fetchItems();
+      })
+      await fetchItems()
     },
     [token, headers, fetchItems],
-  );
+  )
 
+  // ─── Signed out ─────────────────────────────────────────
   if (!token) {
     return (
-      <Stack gap="md" className="playlist-panel playlist-panel--empty">
-        {!embedded && (
-          <Text fw={700} size="sm" tt="uppercase" c="dimmed" lts="0.2em">
-            Wordplaylist
-          </Text>
-        )}
-        <Text size="sm" c="dimmed" ta="center">
-          Sign in with Google to save tracks and sync your Wordplaylist. You’ll stay in the mixer.
-        </Text>
-        <TextInput
-          label="Invite code"
-          placeholder="Required — same as on the start screen"
-          value={inviteCode}
-          onChange={(e) => {
-            setInviteCode(e.target.value);
-            if (signInError) setSignInError('');
-          }}
-          size="sm"
-          disabled={signingIn}
-          autoComplete="off"
-        />
-        <div className="playlist-panel__google-wrap">
+      <div className="flex flex-col gap-3">
+        {!embedded && <div className="wp-label">Wordplaylist</div>}
+        <p className="wp-muted text-center">
+          Sign in with Google to save tracks and sync your Wordplaylist.
+        </p>
+        <div className="flex justify-center">
           <GoogleLogin
             {...googleSignInIdProps}
             {...googleLoginUiProps}
-            onSuccess={(c) => void handlePlaylistGoogleSuccess(c)}
+            onSuccess={(c) => void handleSignIn(c)}
             onError={() => setSignInError('Google sign-in was cancelled')}
           />
         </div>
         {signingIn && (
-          <Text size="xs" c="dimmed" ta="center">
-            Signing in…
-          </Text>
+          <p className="wp-caption text-center">Signing in…</p>
         )}
-        {signInError ? (
-          <Text size="xs" c="red" ta="center" role="alert">
+        {signInError && (
+          <p className="wp-caption text-center text-[var(--wp-danger)]" role="alert">
             {signInError}
-          </Text>
-        ) : null}
-      </Stack>
-    );
+          </p>
+        )}
+      </div>
+    )
   }
 
+  // ─── Signed in ──────────────────────────────────────────
   return (
-    <Stack gap="sm" className="playlist-panel">
-      {!embedded && (
-        <Text fw={700} size="sm" tt="uppercase" c="dimmed" lts="0.2em">
-          Wordplaylist
-        </Text>
-      )}
+    <div className="flex flex-col gap-3 min-h-0">
+      {!embedded && <div className="wp-label">Wordplaylist</div>}
 
-      <FileButton
-        onChange={(files) => files?.length && void handleUploadFiles(Array.from(files))}
+      <input
+        ref={fileInputRef}
+        type="file"
         accept="audio/*"
         multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? [])
+          if (files.length) void handleUploadFiles(files)
+          e.target.value = ''
+        }}
+      />
+
+      <Button
+        size="sm"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={uploading}
+        className="w-full gap-1.5 bg-[var(--wp-accent)]/15 text-[var(--wp-accent-hi)] hover:bg-[var(--wp-accent)]/25 border border-[var(--wp-accent)]/30"
       >
-        {(props) => (
-          <Button
-            {...props}
-            variant="light"
-            color="violet"
-            fullWidth
-            leftSection={<IconPlus size={18} stroke={1.5} />}
-            loading={uploading}
-          >
-            {uploading ? 'Uploading…' : 'Add tracks'}
-          </Button>
+        {uploading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Plus className="h-4 w-4" />
         )}
-      </FileButton>
+        {uploading ? 'Uploading…' : 'Add tracks'}
+      </Button>
 
       {uploadError && (
-        <Text size="xs" c="red" role="alert">
+        <p className="wp-caption text-[var(--wp-danger)]" role="alert">
           {uploadError}
-        </Text>
+        </p>
       )}
 
       {items.length === 0 ? (
-        <Text size="sm" c="dimmed" ta="center" py="md">
-          Drop audio files here or use the button. Multi-select supported.
-        </Text>
+        <p className="wp-muted text-center py-4">
+          Drop audio files here or use the button above.
+        </p>
       ) : (
-        <ScrollArea
-          className="playlist-panel__scroll"
-          style={{ flex: 1, minHeight: 0 }}
-          type="auto"
-          scrollbarSize={6}
-          offsetScrollbars
-        >
-          <Stack gap="xs" pr="xs">
+        <div className="flex flex-col gap-1.5 overflow-y-auto wp-scroll pr-1 min-h-0">
+          <AnimatePresence initial={false}>
             {items.map((item) => {
-              const title = (item.title || '').trim() || item.filename;
-              const artist = (item.artist || '').trim();
-              const busy = loadingId === item.id;
+              const title = (item.title || '').trim() || item.filename
+              const artist = (item.artist || '').trim()
+              const busy = loadingId === item.id
 
               return (
-                <Card
+                <motion.div
                   key={item.id}
-                  padding="sm"
-                  radius="md"
-                  withBorder
-                  shadow="xs"
+                  layout
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
+                  whileHover={{ y: -1 }}
                   draggable
-                  className="playlist-panel__card"
                   onDragStart={(e) => {
-                    e.dataTransfer.setData(WORDPLAYLIST_DRAG_MIME, item.id);
-                    e.dataTransfer.setData('text/plain', item.filename);
-                    e.dataTransfer.effectAllowed = 'copy';
+                    // motion forwards the native event as DragEvent
+                    const de = e as unknown as DragEvent
+                    de.dataTransfer?.setData(WORDPLAYLIST_DRAG_MIME, item.id)
+                    de.dataTransfer?.setData('text/plain', item.filename)
+                    if (de.dataTransfer) de.dataTransfer.effectAllowed = 'copy'
                   }}
+                  className={cn(
+                    'group rounded-xl border border-[var(--wp-border)] bg-[var(--wp-surface-2)]/60 p-2.5 flex items-center gap-2.5 cursor-grab active:cursor-grabbing transition-colors',
+                    'hover:border-[var(--wp-border-hi)] hover:bg-[var(--wp-surface-2)]',
+                  )}
                 >
-                  <Group gap="sm" wrap="nowrap" align="flex-start" justify="space-between">
-                    <Group gap="sm" wrap="nowrap" align="flex-start" style={{ minWidth: 0, flex: 1 }}>
-                      <PlaylistCover itemId={item.id} hasArt={item.has_art} token={token} />
-                      <Stack gap={2} style={{ minWidth: 0, flex: 1 }}>
-                        <Text size="sm" fw={600} lineClamp={2} title={title}>
-                          {busy ? 'Loading…' : title}
-                        </Text>
-                        {artist ? (
-                          <Text size="xs" c="dimmed" lineClamp={1} title={artist}>
-                            {artist}
-                          </Text>
-                        ) : null}
-                        <Group gap={8} wrap="wrap" align="center">
-                          {item.bpm != null && Number.isFinite(item.bpm) ? (
-                            <Badge size="xs" variant="light" color="grape">
-                              {Math.round(item.bpm)} BPM
-                            </Badge>
-                          ) : (
-                            <Text size="xs" c="dimmed">
-                              BPM —
-                            </Text>
-                          )}
-                          <Text size="xs" c="dimmed" ff="monospace">
-                            {fmtDuration(item.duration_sec)}
-                          </Text>
-                        </Group>
-                      </Stack>
-                    </Group>
-                    <Group gap={4} wrap="nowrap">
-                      <Button
-                        size="compact-xs"
-                        variant="light"
-                        color="violet"
-                        disabled={busy}
-                        onClick={() => void handleLoad(item)}
-                      >
-                        Load
-                      </Button>
-                      <ActionIcon
-                        variant="subtle"
-                        color="red"
-                        size="lg"
-                        aria-label="Remove from Wordplaylist"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleDelete(item.id);
-                        }}
-                      >
-                        <IconTrash size={18} stroke={1.5} />
-                      </ActionIcon>
-                    </Group>
-                  </Group>
-                </Card>
-              );
+                  <PlaylistCover itemId={item.id} hasArt={item.has_art} token={token} />
+                  <div className="min-w-0 flex-1">
+                    <div className="wp-title truncate text-[0.8125rem]" title={title}>
+                      {busy ? 'Loading…' : title}
+                    </div>
+                    {artist && (
+                      <div className="wp-caption truncate" title={artist}>
+                        {artist}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      {item.bpm != null && Number.isFinite(item.bpm) ? (
+                        <span className="inline-flex items-center rounded-md bg-[var(--wp-accent)]/15 text-[var(--wp-accent-hi)] text-[10px] font-semibold px-1.5 py-[1px]">
+                          {Math.round(item.bpm)} BPM
+                        </span>
+                      ) : (
+                        <span className="wp-caption text-[10px]">BPM —</span>
+                      )}
+                      <span className="wp-mono text-[11px] text-[var(--wp-muted)]">
+                        {fmtDuration(item.duration_sec)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => void handleLoad(item)}
+                      className="h-6 px-2 text-[11px] bg-[var(--wp-accent)]/15 text-[var(--wp-accent-hi)] hover:bg-[var(--wp-accent)]/25"
+                    >
+                      Load
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      aria-label="Remove from Wordplaylist"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void handleDelete(item.id)
+                      }}
+                      className="h-6 w-6 text-[var(--wp-muted)] hover:text-[var(--wp-danger)] hover:bg-[var(--wp-danger)]/10"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </motion.div>
+              )
             })}
-          </Stack>
-        </ScrollArea>
+          </AnimatePresence>
+        </div>
       )}
-    </Stack>
-  );
+    </div>
+  )
 }

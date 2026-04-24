@@ -609,20 +609,13 @@ export class AutomixController {
 
     sweepFilter(sweepFloor, sweepDur);
 
-    const hpTarget = this._genreId === 'trance' ? 1200 : 800;
+    const hpTarget = 800;
     sweepHighpass(hpTarget, sweepDur * 0.8);
 
     const openDelay = sweepDur * 0.9;
     setTimeout(() => {
       if (this._phase === 'blending') openHighpass(duration * 0.4);
     }, openDelay * 1000);
-
-    // For trance, re-open the lowpass slowly to create the euphoric "filter opening"
-    if (this._genreId === 'trance') {
-      setTimeout(() => {
-        if (this._phase === 'blending') openFilter(duration * 0.5);
-      }, (openDelay + duration * 0.05) * 1000);
-    }
 
     const switchDelay = duration * 0.45;
     setTimeout(() => {

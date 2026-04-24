@@ -40,8 +40,25 @@ uvicorn main:app --reload --port 8000
 
 - **TypeScript**: Follow the existing ESLint config. Run `npm run lint` before committing.
 - **Python**: Follow PEP 8. Keep functions focused and well-documented.
-- **Commits**: Write clear, concise commit messages. Use present tense ("Add feature" not "Added feature").
 - **Comments**: Only for non-obvious logic. Don't narrate what code does — explain *why*.
+
+## Commit Messages (Conventional Commits)
+
+Wordplay uses [release-please](https://github.com/googleapis/release-please) for automated semantic versioning and changelogs. **Every commit merged to `main` must follow [Conventional Commits](https://www.conventionalcommits.org/)**:
+
+| Prefix      | Meaning                            | Version bump |
+| ----------- | ---------------------------------- | ------------ |
+| `feat:`     | User-visible feature               | **minor**    |
+| `fix:`      | User-visible bug fix               | **patch**    |
+| `perf:`     | Performance improvement            | **patch**    |
+| `refactor:` | Internal change, no behavior diff  | none         |
+| `docs:`     | Docs only                          | none         |
+| `chore:`    | Tooling / infra                    | none         |
+| `feat!:`    | Breaking change (add `!` anywhere) | **major**    |
+
+Example: `feat(mix): add ReactFlow node canvas with FX-colored edges`
+
+On every merge to `main`, release-please either bumps a queued release PR or opens a new one that writes `CHANGELOG.md`, tags `vX.Y.Z`, and publishes a GitHub Release.
 
 ## Pull Requests
 

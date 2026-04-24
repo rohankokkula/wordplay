@@ -1,0 +1,262 @@
+@import "tailwindcss";
+@plugin "tailwindcss-animate";
+
+/*
+  Wordplay v1.1 unified design system.
+
+  Single source of truth for typography, color, spacing, radius, shadow,
+  and motion. Every surface in the app (landing, studio, feed, settings,
+  profile, post) reads from these tokens so nothing drifts.
+*/
+
+@custom-variant dark (&:is(.dark *, .dark));
+
+@theme {
+  /* ─── Typography ─────────────────────────────────────────── */
+  --font-display: "Zona Pro", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Type scale (tailwind text-* tokens stay default — we add semantic aliases below) */
+
+  /* ─── Radius ─────────────────────────────────────────────── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 22px;
+
+  /* ─── Colors ─────────────────────────────────────────────── */
+  /* Core surfaces — dark slate backdrop with violet primary */
+  --color-bg: oklch(0.14 0.02 280);
+  --color-surface: oklch(0.17 0.03 280);
+  --color-surface-2: oklch(0.20 0.03 282);
+  --color-surface-3: oklch(0.24 0.03 282);
+  --color-border: oklch(0.26 0.04 280);
+  --color-border-hi: oklch(0.32 0.05 282);
+  --color-text: oklch(0.97 0.01 285);
+  --color-muted: oklch(0.62 0.02 280);
+  --color-muted-2: oklch(0.48 0.02 280);
+
+  /* Brand accents */
+  --color-accent: oklch(0.58 0.16 295);      /* violet primary CTA */
+  --color-accent-hi: oklch(0.72 0.16 295);   /* hover / hi-emphasis */
+  --color-accent-lo: oklch(0.40 0.14 295);   /* pressed / rings */
+
+  /* Semantic */
+  --color-ready: oklch(0.78 0.19 145);       /* spotify-green for "ready/selected" regions */
+  --color-ready-hi: oklch(0.86 0.18 145);
+  --color-warn: oklch(0.78 0.17 80);
+  --color-danger: oklch(0.63 0.22 27);
+
+  /* shadcn token aliases so components using `hsl(var(--border))` etc keep working */
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-text);
+  --color-card: var(--color-surface);
+  --color-card-foreground: var(--color-text);
+  --color-popover: var(--color-surface-2);
+  --color-popover-foreground: var(--color-text);
+  --color-primary: var(--color-accent);
+  --color-primary-foreground: oklch(0.98 0.002 285);
+  --color-secondary: var(--color-surface-2);
+  --color-secondary-foreground: var(--color-text);
+  --color-muted-foreground: var(--color-muted);
+  --color-accent-foreground: var(--color-text);
+  --color-destructive: var(--color-danger);
+  --color-destructive-foreground: oklch(0.98 0.005 285);
+  --color-input: var(--color-border);
+  --color-ring: var(--color-accent-hi);
+}
+
+/*
+  Plain CSS custom properties mirror the theme tokens so they can be used
+  in arbitrary-value Tailwind classes (bg-[var(--wp-surface)]) and by
+  components that need a literal hex/hsl value (inline SVG, canvas).
+*/
+:root {
+  /* Surfaces */
+  --wp-bg: #0A0A10;
+  --wp-surface: #13131A;
+  --wp-surface-2: #1A1A22;
+  --wp-surface-3: #22222C;
+  --wp-waveform-bg: #1F1F1F;        /* matches reference SVG container */
+  --wp-border: #2A2A36;
+  --wp-border-hi: #3A3A48;
+
+  /* Text */
+  --wp-text: #F4F3F8;
+  --wp-fg: var(--wp-text);          /* legacy alias — some pages use --wp-fg */
+  --wp-muted: #9897A6;
+  --wp-muted-2: #6E6D7A;
+
+  /* Accents */
+  --wp-accent: #6E5DBB;
+  --wp-accent-hi: #8B7FD6;
+  --wp-accent-lo: #4A3E86;
+
+  /* Semantic */
+  --wp-ready: #1ED760;              /* exact hex from reference SVG */
+  --wp-ready-hi: #3BEA7B;
+  --wp-warn: #F4B93F;
+  --wp-danger: #F0597A;
+
+  /* Deck identity — kept for legacy components; still used by Visualizer */
+  --wp-deck-a: #8B7FD6;
+  --wp-deck-b: #1ED760;
+
+  /* FX edge colors — must match `stroke-*` classes in MixCanvas */
+  --fx-none: #64748B;
+  --fx-reverb: #38BDF8;
+  --fx-echo: #A78BFA;
+  --fx-lowpass: #FBBF24;
+  --fx-filter-sweep: #FB7185;
+  --fx-stutter: #34D399;
+
+  /* Spacing scale — used by arbitrary-value utilities */
+  --wp-space-1: 4px;
+  --wp-space-2: 8px;
+  --wp-space-3: 12px;
+  --wp-space-4: 16px;
+  --wp-space-5: 20px;
+  --wp-space-6: 24px;
+  --wp-space-8: 32px;
+  --wp-space-10: 40px;
+  --wp-space-12: 48px;
+
+  /* Shadow scale */
+  --wp-shadow-sm: 0 1px 2px rgb(0 0 0 / 0.35);
+  --wp-shadow-md: 0 4px 12px rgb(0 0 0 / 0.35), 0 1px 2px rgb(0 0 0 / 0.25);
+  --wp-shadow-lg: 0 10px 30px rgb(0 0 0 / 0.45), 0 2px 4px rgb(0 0 0 / 0.3);
+  --wp-shadow-glow: 0 0 24px color-mix(in oklab, var(--wp-accent) 45%, transparent);
+  --wp-shadow-ready: 0 0 20px color-mix(in oklab, var(--wp-ready) 45%, transparent);
+}
+
+/* Reduced-motion — read by src/motion/reducedMotion.ts */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --wp-motion-scale: 0;
+  }
+}
+
+/* ─── Base layer ─────────────────────────────────────────── */
+@layer base {
+  html {
+    color-scheme: dark;
+    font-family: var(--font-sans);
+    background: var(--wp-bg);
+    color: var(--wp-text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background: var(--wp-bg);
+    color: var(--wp-text);
+  }
+
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+
+  /* Consistent scrollbar across every scrollable surface */
+  .wp-scroll::-webkit-scrollbar,
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .wp-scroll::-webkit-scrollbar-thumb,
+  *::-webkit-scrollbar-thumb {
+    background: var(--wp-border);
+    border-radius: 999px;
+  }
+  .wp-scroll::-webkit-scrollbar-thumb:hover,
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--wp-accent);
+  }
+  .wp-scroll::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* ─── Semantic utility classes ───────────────────────────── */
+
+/* Glass card — standard panel background used across the whole app */
+.wp-glass {
+  background: color-mix(in oklab, var(--wp-surface) 88%, transparent);
+  backdrop-filter: blur(14px);
+  border: 1px solid color-mix(in oklab, var(--wp-border) 80%, transparent);
+}
+
+.wp-elevated {
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 5%, transparent),
+    0 8px 24px color-mix(in oklab, black 35%, transparent);
+}
+
+/* Typography — ONE class per semantic role, used everywhere */
+.wp-h1 {
+  font-family: var(--font-display);
+  font-size: clamp(2.25rem, 4vw, 3rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  color: var(--wp-text);
+}
+.wp-h2 {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  color: var(--wp-text);
+}
+.wp-h3 {
+  font-family: var(--font-display);
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  color: var(--wp-text);
+}
+.wp-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--wp-text);
+  line-height: 1.35;
+}
+.wp-body {
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: var(--wp-text);
+  line-height: 1.5;
+}
+.wp-muted {
+  font-size: 0.8125rem;
+  color: var(--wp-muted);
+  line-height: 1.5;
+}
+.wp-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--wp-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+.wp-caption {
+  font-size: 0.75rem;
+  color: var(--wp-muted);
+  line-height: 1.4;
+}
+.wp-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8125rem;
+}
+
+/* Focus ring — identical across all interactive surfaces */
+.wp-focus:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--wp-bg), 0 0 0 4px var(--wp-accent-hi);
+}

@@ -28,12 +28,14 @@ export const googleLoginUiProps = {
   containerProps: {
     className: 'google-login-container',
     style: {
-      width: '100%',
+      /* Intentionally NOT 100% — that stretches the GSI host across the
+       * whole card when the parent is a flex child with default stretch. */
+      width: 'auto',
       maxWidth: 360,
       height: 'auto',
       minHeight: 48,
       overflow: 'visible',
-      display: 'flex',
+      display: 'inline-flex',
       justifyContent: 'center',
       alignItems: 'center',
       backgroundColor: 'transparent',

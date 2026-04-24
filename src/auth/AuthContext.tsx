@@ -23,7 +23,11 @@ interface AuthState {
   user: AuthUser | null;
   token: string | null;
   loading: boolean;
-  loginWithGoogle: (idToken: string, inviteCode: string) => Promise<void>;
+  /** True once a Google user is signed in (token + user). Anonymous users are false. */
+  isAuthenticated: boolean;
+  /** True if the user has explicitly opted into anonymous studio access. */
+  hasStarted: boolean;
+  loginWithGoogle: (idToken: string) => Promise<void>;
   continueAnonymous: () => void;
   logout: () => void;
 }
@@ -31,6 +35,40 @@ interface AuthState {
 const AuthCtx = createContext<AuthState | null>(null);
 
 const TOKEN_KEY = 'wordplay_jwt';
+const MODE_KEY = 'wordplay_mode';
+
+/**
+ * Centralized session storage helpers. Uses localStorage so sessions survive a
+ * tab reload while still allowing clean logout via `clearSession`. Kept in one
+ * place so protected routes, the /login redirect, and the feed loader all
+ * read/write consistently.
+ */
+function readSavedToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY) ?? sessionStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function persistSession(token: string, mode: AuthMode) {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(MODE_KEY, mode);
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearSession() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(MODE_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<AuthMode | null>(null);
@@ -39,8 +77,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const saved = sessionStorage.getItem(TOKEN_KEY);
+    const savedMode = (() => {
+      try { return localStorage.getItem(MODE_KEY) as AuthMode | null; } catch { return null; }
+    })();
+    const saved = readSavedToken();
     if (!saved) {
+      if (savedMode === 'anonymous') setMode('anonymous');
       setLoading(false);
       return;
     }
@@ -57,18 +99,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setMode('premium');
       })
       .catch(() => {
-        sessionStorage.removeItem(TOKEN_KEY);
+        clearSession();
         setToken(null);
       })
       .finally(() => setLoading(false));
   }, []);
 
-  const loginWithGoogle = useCallback(async (idToken: string, inviteCode: string) => {
+  const loginWithGoogle = useCallback(async (idToken: string) => {
     const url = apiUrl('/api/auth/google');
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id_token: idToken, invite_code: inviteCode }),
+      body: JSON.stringify({ id_token: idToken }),
     });
     if (!res.ok) {
       let message = 'Login failed';
@@ -98,26 +140,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(data.access_token);
     setUser(data.user);
     setMode('premium');
-    sessionStorage.setItem(TOKEN_KEY, data.access_token);
+    persistSession(data.access_token, 'premium');
   }, []);
 
   const continueAnonymous = useCallback(() => {
     setMode('anonymous');
     setUser(null);
     setToken(null);
-    sessionStorage.removeItem(TOKEN_KEY);
+    clearSession();
+    try { localStorage.setItem(MODE_KEY, 'anonymous'); } catch { /* ignore */ }
   }, []);
 
   const logout = useCallback(() => {
     setMode(null);
     setUser(null);
     setToken(null);
-    sessionStorage.removeItem(TOKEN_KEY);
+    clearSession();
   }, []);
-
-  if (loading) {
-    return null;
-  }
 
   return (
     <AuthCtx.Provider
@@ -126,6 +165,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         token,
         loading,
+        isAuthenticated: !!user && !!token,
+        hasStarted: mode !== null,
         loginWithGoogle,
         continueAnonymous,
         logout,

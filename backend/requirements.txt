@@ -17,3 +17,12 @@ requests  # required by google.auth.transport.requests (verify_oauth2_token)
 pyjwt>=2.0
 aiofiles
 mutagen>=1.47
+# Stem separation (two-stems vocals mode via `python -m demucs.separate`).
+# torch is a heavy dep — install the CPU wheel on Railway via:
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio
+# TorchAudio 2.9+ calls torchcodec inside torchaudio.save(); install it or separation fails at write-out.
+# If these are missing the FastAPI process still boots; /api/stems/separate
+# returns a 500 with a clear "demucs is not installed" message.
+demucs>=4.0.0; python_version >= "3.11"
+torch>=2.0.0; python_version >= "3.11"
+torchcodec>=0.1.0; python_version >= "3.11"
