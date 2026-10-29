@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && npm run build:smashup",
+    "build:smashup": "npm --prefix smashup ci --no-audit --no-fund && npm --prefix smashup run build -- --base=/smashup/ && rm -rf dist/smashup && cp -r smashup/dist dist/smashup",
     "lint": "eslint .",
     "preview": "vite preview"
   },

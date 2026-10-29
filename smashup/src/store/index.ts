@@ -313,12 +313,12 @@ export const useStore = create<State>((set, get) => {
       for (const song of crate.songs) {
         void (async () => {
           try {
-            const r = await fetch(`/preloads/${t.id}/${song.preloadSlug}.mp3`)
+            const r = await fetch(`${import.meta.env.BASE_URL}preloads/${t.id}/${song.preloadSlug}.mp3`)
             if (!r.ok || !(r.headers.get('content-type') ?? '').includes('audio')) return
             const blob = await r.blob()
             let sidecar = null
             try {
-              const w = await fetch(`/preloads/${t.id}/${song.preloadSlug}.words.json`)
+              const w = await fetch(`${import.meta.env.BASE_URL}preloads/${t.id}/${song.preloadSlug}.words.json`)
               if (w.ok && (w.headers.get('content-type') ?? '').includes('json')) sidecar = (await w.json()).words ?? null
             } catch {
               /* optional */
