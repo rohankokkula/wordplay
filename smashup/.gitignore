@@ -1,0 +1,8 @@
+node_modules/
+dist/
+e2e/out/
+e2e/fixtures/
+# Copyrighted audio stays local — see public/preloads/README.md
+public/preloads/**/*.mp3
+public/preloads/**/*.wav
+public/preloads/**/*.m4a

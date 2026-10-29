@@ -32,6 +32,8 @@
   <img src="https://img.shields.io/badge/version-1.1.0-6e5dbb" alt="v1.1.0" />
 </p>
 
+> **New on the `smashup` branch — [Smashup](smashup/README.md).** Make a crate around one word (“paisa”), drop in songs, and get a producer-grade mashup: word-level hit detection, 4-stem layering on one master tempo and key, a composer that writes a non-linear arc with real DJ moves, playable pads and an editable arrangement. It lives in `smashup/` with its own analysis router in `backend/smashup/`.
+
 > **v1.1.0 — Social mix studio.** Wordplay is now a two-sided product: create a mix on the node-based ReactFlow canvas (vocal + instrument stems via Demucs, swappable instrument beds, color-coded FX edges), then publish, share, like, comment, follow, and remix on the public feed. Mobile-first shadcn UI, motion.dev springs everywhere, 4 themes, invite-free Google login, and automated semver via release-please. See [`CHANGELOG.md`](CHANGELOG.md) for details.
 
 ---

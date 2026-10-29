@@ -40,6 +40,8 @@ from playlist import router as playlist_router
 from community import router as community_router
 from social import router as social_router
 from stems import router as stems_router
+from smashup import router as smashup_router
+from whisper_model import get_whisper_model
 
 logger = logging.getLogger("wordplay")
 
@@ -94,6 +96,7 @@ app.include_router(playlist_router)
 app.include_router(community_router)
 app.include_router(social_router)
 app.include_router(stems_router)
+app.include_router(smashup_router)
 
 
 @app.on_event("startup")
@@ -284,24 +287,8 @@ async def lyrics_get(
 
 # ── Whisper transcription ─────────────────────────────────────────────
 
-_whisper_model = None
-WHISPER_MODEL_SIZE = "base"
-
-
 def _get_whisper_model():
-    global _whisper_model
-    if _whisper_model is not None:
-        return _whisper_model
-    try:
-        from faster_whisper import WhisperModel
-        logger.info("Loading faster-whisper model '%s' …", WHISPER_MODEL_SIZE)
-        _whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device="cpu", compute_type="int8")
-        logger.info("Whisper model loaded.")
-        return _whisper_model
-    except ImportError:
-        raise HTTPException(501, "faster-whisper not installed — run: pip install faster-whisper")
-    except Exception as e:
-        raise HTTPException(502, f"Failed to load Whisper model: {e}") from e
+    return get_whisper_model()
 
 
 def _transcribe_audio(path: str) -> list[dict]:
