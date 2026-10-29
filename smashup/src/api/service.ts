@@ -85,23 +85,72 @@ export async function fetchStem(url: string): Promise<Blob> {
 /* ── LRCLib fallback (line-synced lyrics → interpolated word times) ──── */
 
 interface LrcResult {
+  trackName?: string
+  artistName?: string
   syncedLyrics?: string | null
+  plainLyrics?: string | null
   duration?: number
 }
 
-export async function lyricsWords(query: string, duration: number): Promise<Word[] | null> {
+export interface LyricsLookup {
+  words: Word[] | null
+  /** Why nothing usable came back — shown on the Word Wall. */
+  note: string
+}
+
+const LRC_TOLERANCE = 30
+
+async function lrcFetch(path: string): Promise<unknown> {
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), 8000)
   try {
-    const r = await fetch(`https://lrclib.net/api/search?q=${encodeURIComponent(query)}`)
-    if (!r.ok) return null
-    const list = (await r.json()) as LrcResult[]
-    const best = list
-      .filter((x) => x.syncedLyrics)
-      .sort((a, b) => Math.abs((a.duration ?? 0) - duration) - Math.abs((b.duration ?? 0) - duration))[0]
-    if (!best?.syncedLyrics || Math.abs((best.duration ?? duration) - duration) > 20) return null
-    return lrcToWords(best.syncedLyrics, duration)
-  } catch {
-    return null
+    const r = await fetch(`https://lrclib.net${path}`, { signal: ctl.signal })
+    return r.ok ? await r.json() : null
+  } finally {
+    clearTimeout(timer)
   }
+}
+
+/** Query variants, most specific first: template query, title, cleaned filename. */
+export function lyricQueries(...raw: (string | null | undefined)[]): string[] {
+  const clean = (q: string) =>
+    q
+      .replace(/\.[a-z0-9]{2,4}$/i, '')
+      .replace(/[_]+/g, ' ')
+      .replace(/\s*[([](official|lyrics?|audio|video|hd|4k|full song)[^)\]]*[)\]]/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  const out: string[] = []
+  for (const q of raw) {
+    if (!q) continue
+    const c = clean(q)
+    if (c && !out.some((o) => o.toLowerCase() === c.toLowerCase())) out.push(c)
+  }
+  return out
+}
+
+export async function lyricsWords(queries: string[], duration: number): Promise<LyricsLookup> {
+  let sawAny = false
+  let sawSynced = false
+  try {
+    for (const q of queries) {
+      const list = ((await lrcFetch(`/api/search?q=${encodeURIComponent(q)}`)) as LrcResult[] | null) ?? []
+      if (list.length) sawAny = true
+      const synced = list.filter((x) => x.syncedLyrics)
+      if (synced.length) sawSynced = true
+      const best = synced
+        .filter((x) => Math.abs((x.duration ?? duration) - duration) <= LRC_TOLERANCE)
+        .sort((a, b) => Math.abs((a.duration ?? 0) - duration) - Math.abs((b.duration ?? 0) - duration))[0]
+      if (best?.syncedLyrics) {
+        return { words: lrcToWords(best.syncedLyrics, duration), note: `lyrics: ${best.trackName ?? q}${best.artistName ? ` — ${best.artistName}` : ''}` }
+      }
+    }
+  } catch {
+    return { words: null, note: 'lyrics service unreachable' }
+  }
+  if (!sawAny) return { words: null, note: `no lyrics found for "${queries[0] ?? ''}"` }
+  if (!sawSynced) return { words: null, note: 'only unsynced lyrics exist for this song' }
+  return { words: null, note: 'synced lyrics found, but for a different length/version' }
 }
 
 export function lrcToWords(lrc: string, duration: number): Word[] {

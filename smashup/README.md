@@ -85,10 +85,16 @@ The pipeline:
 
 Everything is cached by sha256, so re-uploads are free.
 
-**Without the service** the app runs in on-device mode. Tempo, key and sections are always computed locally. Words come from:
+**Without the service** the app runs in on-device mode. Tempo, key and sections are always computed locally. Words come from, in order:
 - a `song.words.json` sidecar dropped next to the audio,
-- LRCLib synced lyrics (interpolated to words, then onset-snapped),
-- or manual marks on the Word Wall.
+- **in-browser Whisper** (transformers.js, `whisper-base` with word timestamps). It uses WebGPU when available, otherwise WASM. The model downloads once (about 75 MB) and transcripts are cached per song. The input is band-limited to the vocal range. Set a language hint (Hindi / Urdu / Punjabi) on the Word Wall.
+- LRCLib synced lyrics. It tries the template query, then the title, then the filename, and also cross-checks Whisper: lyric lines with the word boost nearby hits and add any it missed as suggestions.
+- **Mark one, find all.** Shift-click one “paisa” on a song's waveform and press *Find all*.
+  - It snaps the click to the syllable, builds an MFCC + energy-contour template, and scans every song at three time-stretches.
+  - Strong matches are accepted; weaker ones land in *Sounds like “paisa”* for review.
+  - On the synthetic crate, one click on a full mix (no stems) finds 19 of 20 with no false accepts.
+
+Keyword matching folds Latin, Devanagari, Gurmukhi and Urdu script, so paisa / पैसा / ਪੈਸਾ / پیسہ / پیسے all match. Each song shows *why* it has the hits it has.
 
 Stem layering moves are disabled until stems exist.
 
@@ -98,7 +104,7 @@ Stem layering moves are disabled until stems exist.
 cd smashup
 npm install
 npm run dev        # http://localhost:5173 (proxies /api → :8000)
-npm test           # 32 unit tests: matcher, Camelot, solver, grammar, grid, on-device analysis
+npm test           # 38 unit tests: matcher, Camelot, solver, grammar, grid, on-device analysis, find-all spotter
 npm run e2e        # headless Chromium end-to-end (needs `playwright`), screenshots in e2e/out/
 ```
 

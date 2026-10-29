@@ -23,7 +23,42 @@ _DEVA = {
 _VOWEL_SIGNS = set("ािीुूेैोौ्ंँ")
 
 
+# Urdu / Shahmukhi (Arabic script); ی / و / ہ depend on position — mirror of keywordMatch.ts.
+_ARABIC = {
+    "ا": "a", "آ": "aa", "ب": "b", "پ": "p", "ت": "t", "ٹ": "t", "ث": "s", "ج": "j", "چ": "ch", "ح": "h",
+    "خ": "kh", "د": "d", "ڈ": "d", "ذ": "z", "ر": "r", "ڑ": "r", "ز": "z", "ژ": "zh", "س": "s", "ش": "sh",
+    "ص": "s", "ض": "z", "ط": "t", "ظ": "z", "ع": "a", "غ": "gh", "ف": "f", "ق": "q", "ک": "k", "ك": "k",
+    "گ": "g", "ل": "l", "م": "m", "ن": "n", "ں": "n", "ھ": "h", "ء": "", "ئ": "e", "ے": "e", "ۓ": "e",
+    "ة": "a", "ۂ": "a", "\u064e": "a", "\u0650": "i", "\u064f": "u", "\u0651": "", "\u0652": "",
+}
+
+
+def _is_arabic(c: str | None) -> bool:
+    return c is not None and "\u0600" <= c <= "\u06ff"
+
+
+def _translit_arabic(word: str) -> str:
+    out = []
+    for i, ch in enumerate(word):
+        prev = word[i - 1] if i > 0 else None
+        nxt = word[i + 1] if i + 1 < len(word) else None
+        start, end = not _is_arabic(prev), not _is_arabic(nxt)
+        if ch in "یي":
+            out.append("y" if start else "i" if end else "e")
+        elif ch == "و":
+            out.append("v" if start else "o")
+        elif ch in "ہه":
+            out.append("a" if end and not start else "h")
+        else:
+            out.append(_ARABIC.get(ch, ch))
+    return "".join(out)
+
+
 def translit(s: str) -> str:
+    # Gurmukhi mirrors the Devanagari block 0x100 lower.
+    s = "".join(chr(ord(c) - 0x100) if "\u0a00" <= c <= "\u0a7f" else c for c in s)
+    if any(_is_arabic(c) for c in s):
+        s = _translit_arabic(s)
     out: list[str] = []
     for ch in s:
         if ch in _DEVA:

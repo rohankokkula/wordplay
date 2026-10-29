@@ -158,6 +158,44 @@ function assert(cond, msg) {
     await page.waitForTimeout(600)
     await page.screenshot({ path: path.join(OUT, '6-upload.png') })
 
+    console.log('6. No words anywhere → mark one, find all')
+    // Hugging Face + LRCLib are unreachable in CI: stub in-browser ASR to hear nothing.
+    await page.evaluate(() => { window.__smashupAsrStub = async () => [] })
+    await page.getByRole('button', { name: 'New crate' }).click()
+    await page.getByPlaceholder('Crate name (e.g. Paisa)').fill('No words test')
+    await page.getByPlaceholder('Keyword (e.g. paisa)').fill('paisa')
+    await page.getByRole('button', { name: 'Create' }).click()
+    await page.getByTestId('file-input').setInputFiles([path.join(FIX, 'test-paisa.wav')])
+    await waitState(() => {
+      const s = window.__smashup.getState()
+      const c = s.crates.find((x) => x.id === s.activeId)
+      return c?.name === 'No words test' && c.songs[0]?.status === 'ready'
+    })
+    await page.getByTestId('mode-discover').click()
+    await page.getByTestId('zero-hits').waitFor({ timeout: 20000 })
+    const note = await page.getByTestId('words-note').innerText()
+    assert(/not heard|no lyrics|unreachable/.test(note), `zero-hit reason is explained: "${note}"`)
+    const truthTimes = JSON.parse(fs.readFileSync(path.join(FIX, 'test-paisa.words.json'), 'utf8')).words.filter((w) => w.w === 'paisa').map((w) => w.start)
+    const dur = await state(() => { const s = window.__smashup.getState(); return s.crates.find((x) => x.id === s.activeId).songs[0].analysis.duration })
+    const canvas = page.getByTestId('song-strip').locator('canvas')
+    const box = await canvas.boundingBox()
+    const target = truthTimes[3]
+    await page.keyboard.down('Shift')
+    await canvas.click({ position: { x: (target / dur) * box.width + 1, y: box.height / 2 } })
+    await page.keyboard.up('Shift')
+    await page.getByTestId('find-all').click()
+    await waitState(() => !window.__smashup.getState().spotting && window.__smashup.getState().crates.find((x) => x.name === 'No words test').songs[0].hits.length > 3, 60000)
+    const found = await state(() => {
+      const so = window.__smashup.getState().crates.find((x) => x.name === 'No words test').songs[0]
+      return { accepted: so.hits.filter((h) => h.accepted).map((h) => h.start), suggested: so.hits.filter((h) => h.suggested).length, moments: so.moments.filter((m) => m.hitTimes.length).length, pads: so.pads.filter((p) => p.momentId).length }
+    })
+    const correct = found.accepted.filter((t) => truthTimes.some((u) => Math.abs(u - t) < 0.08)).length
+    assert(found.accepted.length >= 8, `find all accepted ${found.accepted.length} hits (+${found.suggested} to review)`)
+    assert(correct / found.accepted.length > 0.85, `${correct}/${found.accepted.length} accepted hits land on a real "paisa"`)
+    assert(found.moments >= 2 && found.pads === 4, `moments (${found.moments} with hits) and pads rebuilt`)
+    await page.waitForTimeout(600)
+    await page.screenshot({ path: path.join(OUT, '7-find-all.png'), fullPage: true })
+
     assert(errors.length === 0, `no page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
     console.log('\nE2E PASSED')
   } catch (e) {

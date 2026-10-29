@@ -12,7 +12,7 @@ import smashup
 from smashup.keywords import fold, matches
 
 
-@pytest.mark.parametrize("word", ["paisa", "Paisaa", "pesa", "पैसा", "PAISA!", "paysa"])
+@pytest.mark.parametrize("word", ["paisa", "Paisaa", "pesa", "पैसा", "PAISA!", "paysa", "پیسہ", "پیسے", "ਪੈਸਾ"])
 def test_paisa_variants_match(word):
     assert matches(word, ["paisa"]) is not None
 

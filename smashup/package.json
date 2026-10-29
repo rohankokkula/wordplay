@@ -12,6 +12,7 @@
     "e2e": "node e2e/run.cjs"
   },
   "dependencies": {
+    "@huggingface/transformers": "3.8.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.64.0",
     "react": "^19.3.1",

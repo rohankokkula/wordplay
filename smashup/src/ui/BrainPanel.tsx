@@ -32,7 +32,7 @@ export function BrainPanel() {
             Service online: {service.demucs ? '4-stem Demucs' : 'no stems'} · Whisper {service.whisper_model} {service.align ? '· MMS alignment' : ''}
           </span>
         ) : (
-          <span className="text-pad2">On-device mode. Beat/key run locally; words come from LRCLib, sidecars or your marks. Deploy the backend for stems + word alignment.</span>
+          <span className="text-pad2">On-device mode. Beat/key run locally; words come from in-browser Whisper (model downloads once), synced lyrics, or one hit you mark + Find all. Deploy the backend for stems + syllable-exact alignment.</span>
         )}
       </div>
 

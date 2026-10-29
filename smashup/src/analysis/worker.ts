@@ -1,11 +1,18 @@
 /// <reference lib="webworker" />
 import { analyzeMono } from './music'
+import { spot, type Seed } from './spotter'
 
-self.onmessage = (e: MessageEvent<{ id: number; pcm: Float32Array; sr: number }>) => {
-  const { id, pcm, sr } = e.data
+type Msg =
+  | { id: number; kind: 'analyze'; pcm: Float32Array; sr: number }
+  | { id: number; kind: 'spot'; songs: { pcm: Float32Array; sr: number }[]; seeds: Seed[] }
+
+self.onmessage = (e: MessageEvent<Msg>) => {
+  const m = e.data
+  const post = (r: unknown) => (self as unknown as Worker).postMessage(r)
   try {
-    ;(self as unknown as Worker).postMessage({ id, ok: true, analysis: analyzeMono(pcm, sr) })
+    if (m.kind === 'spot') post({ id: m.id, ok: true, result: spot(m.songs, m.seeds) })
+    else post({ id: m.id, ok: true, result: analyzeMono(m.pcm, m.sr) })
   } catch (err) {
-    ;(self as unknown as Worker).postMessage({ id, ok: false, error: String(err) })
+    post({ id: m.id, ok: false, error: String(err) })
   }
 }

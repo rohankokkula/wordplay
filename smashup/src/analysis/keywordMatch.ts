@@ -19,7 +19,36 @@ const DEVA: Record<string, string> = {
 }
 const VOWEL_SIGNS = new Set('ािीुूेैोौ्ंँ'.split(''))
 
-export function translit(s: string): string {
+// Urdu / Shahmukhi (Arabic script). Vowels are mostly unwritten, so ی / و / ہ
+// depend on position: پیسہ → pesa, پیسے → pese (both fold to "paisa"'s neighbourhood).
+const ARABIC: Record<string, string> = {
+  ا: 'a', آ: 'aa', ب: 'b', پ: 'p', ت: 't', ٹ: 't', ث: 's', ج: 'j', چ: 'ch', ح: 'h', خ: 'kh', د: 'd', ڈ: 'd',
+  ذ: 'z', ر: 'r', ڑ: 'r', ز: 'z', ژ: 'zh', س: 's', ش: 'sh', ص: 's', ض: 'z', ط: 't', ظ: 'z', ع: 'a', غ: 'gh',
+  ف: 'f', ق: 'q', ک: 'k', ك: 'k', گ: 'g', ل: 'l', م: 'm', ن: 'n', ں: 'n', ھ: 'h', ء: '', ئ: 'e', ے: 'e', ۓ: 'e',
+  ة: 'a', ۂ: 'a', 'َ': 'a', 'ِ': 'i', 'ُ': 'u', 'ّ': '', 'ْ': '',
+}
+const isArabicLetter = (c: string | undefined) => !!c && /[\u0600-\u06FF]/.test(c)
+
+function translitArabic(word: string): string {
+  const chars = [...word]
+  return chars
+    .map((ch, i) => {
+      const prev = chars[i - 1]
+      const next = chars[i + 1]
+      const start = !isArabicLetter(prev)
+      const end = !isArabicLetter(next)
+      if (ch === 'ی' || ch === 'ي') return start ? 'y' : end ? 'i' : 'e'
+      if (ch === 'و') return start ? 'v' : 'o'
+      if (ch === 'ہ' || ch === 'ه') return end && !start ? 'a' : 'h'
+      return ARABIC[ch] ?? ch
+    })
+    .join('')
+}
+
+export function translit(input: string): string {
+  // Gurmukhi mirrors the Devanagari block 0x100 lower (ਪੈਸਾ → पैसा).
+  let s = input.replace(/[\u0A00-\u0A7F]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x100))
+  if (/[\u0600-\u06FF]/.test(s)) s = translitArabic(s)
   const out: string[] = []
   for (const ch of s) {
     const val = DEVA[ch]

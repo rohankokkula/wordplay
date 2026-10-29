@@ -65,7 +65,7 @@ export interface Word {
   p: number
 }
 
-export type HitSource = 'aligned' | 'asr' | 'lyrics' | 'manual' | 'sidecar'
+export type HitSource = 'aligned' | 'asr' | 'asr-local' | 'lyrics' | 'manual' | 'sidecar' | 'match'
 
 export interface Hit {
   id: string
@@ -76,6 +76,8 @@ export interface Hit {
   confidence: number
   source: HitSource
   accepted: boolean
+  /** A "find all like this" candidate waiting for review. */
+  suggested?: boolean
   /** How many other hits sit within ±2 bars — chants score high. */
   cluster: number
   /** 0..1 — cluster × energy × repetition. */
@@ -121,7 +123,11 @@ export interface Song {
   error: string | null
   analysis: SongAnalysis | null
   words: Word[] | null
-  wordsSource: 'service' | 'sidecar' | 'lyrics' | 'none' | null
+  wordsSource: 'service' | 'sidecar' | 'browser' | 'lyrics' | 'none' | null
+  /** Why the word search came back the way it did (shown when hits are 0). */
+  wordsNote?: string
+  /** Lyrics search hint (template query or user-provided). */
+  query?: string
   hits: Hit[]
   moments: Moment[]
   pads: Pad[]
@@ -140,6 +146,8 @@ export interface Crate {
   songs: Song[]
   createdAt: number
   template?: string
+  /** Whisper language hint for in-browser transcription. */
+  language?: 'auto' | 'hindi' | 'urdu' | 'punjabi' | 'english'
 }
 
 /* ── Arrangement ─────────────────────────────────────────────────────── */

@@ -103,6 +103,7 @@ function SongList() {
   const removeSong = useStore((s) => s.removeSong)
   const reanalyze = useStore((s) => s.reanalyze)
   const master = useStore((s) => s.master)
+  const setMode = useStore((s) => s.setMode)
   const input = useRef<HTMLInputElement>(null)
   const [slot, setSlot] = useState<string | undefined>()
   const [drag, setDrag] = useState(false)
@@ -172,7 +173,13 @@ function SongList() {
                 <span className="rounded bg-black/30 px-1">
                   {keyName(s.analysis.key)} · {s.analysis.key.camelot}
                 </span>
-                <span className={clsx('rounded px-1', s.hits.length ? 'bg-pad4/15 text-pad4' : 'bg-accent/15 text-accent')}>{s.hits.filter((h) => h.accepted).length} hits</span>
+                {s.hits.some((h) => h.accepted) ? (
+                  <span className="rounded bg-pad4/15 px-1 text-pad4">{s.hits.filter((h) => h.accepted).length} hits</span>
+                ) : (
+                  <button className="rounded bg-accent/15 px-1 text-accent hover:bg-accent/25" onClick={() => setMode('discover')} title={s.wordsNote ?? ''}>
+                    0 hits · why?
+                  </button>
+                )}
                 {s.hasStems && (
                   <span className="flex items-center gap-0.5 rounded bg-music/15 px-1 text-music">
                     <AudioLines size={9} /> 4 stems

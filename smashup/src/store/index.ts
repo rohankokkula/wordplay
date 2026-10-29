@@ -11,7 +11,10 @@ import { type BrainSong, chooseMove, compose } from '@/brain/composer'
 import { MOVES } from '@/brain/moves'
 import { buildTimeline } from '@/engine/timeline'
 import { session } from '@/engine/session'
-import { analyzeSong, rebuildMoments, type SongSource } from '@/analysis/pipeline'
+import { analyzeSong, listeningSource, rebuildMoments, rescanWords as rescanSongWords, spotInWorker, type PipelineDeps, type SongSource } from '@/analysis/pipeline'
+import { toAsrInput, type AsrLanguage } from '@/analysis/asr'
+import { AUTO_ACCEPT } from '@/analysis/spotter'
+import { refineOnset } from '@/analysis/music'
 import { crateAliases, hitId } from '@/analysis/keywordMatch'
 import { checkService, type ServiceHealth } from '@/api/service'
 import { DEMO_SONGS, demoHash, renderDemoSource } from '@/demo'
@@ -68,6 +71,12 @@ interface State {
   setHit: (songId: string, hitId: string, patch: Partial<Hit>) => void
   addManualHit: (songId: string, time: number) => void
   setPad: (songId: string, pad: number, momentId: string | null) => void
+  /** Re-run only word detection for one song or the whole active crate. */
+  rescanWords: (songId: string | 'crate') => Promise<void>
+  /** Query-by-example: use this hit as a template and find similar ones. */
+  findSimilar: (songId: string, hitId: string, scope: 'song' | 'crate') => Promise<void>
+  setLanguage: (lang: AsrLanguage) => void
+  spotting: boolean
 
   setCurve: (c: CurvePreset) => void
   setTarget: (s: number) => void
@@ -193,23 +202,27 @@ export const useStore = create<State>((set, get) => {
     }, 260)
   }
 
-  const runPipeline = async (song: Song, src: SongSource) => {
-    const crate = crateOfSong(song.id)
-    if (!crate) return
-    await analyzeSong(song, src, {
+  const depsFor = (songId: string): PipelineDeps | null => {
+    const crate = crateOfSong(songId)
+    if (!crate) return null
+    return {
       aliases: crateAliases(crate.keyword, crate.aliases),
       service: get().service,
-      query: song.title,
+      language: crate.language ?? 'auto',
+      browserAsr: true,
       update: (patch) => {
-        patchSong(song.id, patch)
-        if (patch.status === 'ready') {
-          if (crate.id === get().activeId) {
-            rebuild(get().plan)
-            scheduleAutoCompose()
-          }
+        patchSong(songId, patch)
+        if (patch.status === 'ready' && crate.id === get().activeId) {
+          rebuild(get().plan)
+          scheduleAutoCompose()
         }
       },
-    })
+    }
+  }
+
+  const runPipeline = async (song: Song, src: SongSource) => {
+    const deps = depsFor(song.id)
+    if (deps) await analyzeSong(song, src, deps)
   }
 
   const recordPlan = (p: Plan) => {
@@ -264,6 +277,7 @@ export const useStore = create<State>((set, get) => {
     preparing: null,
     exporting: false,
     toast: null,
+    spotting: false,
 
     init: async () => {
       session.setResolver((songId) => crateOfSong(songId)?.songs.find((s) => s.id === songId)?.hash ?? null)
@@ -274,6 +288,8 @@ export const useStore = create<State>((set, get) => {
       for (const c of crates) {
         for (const s of c.songs) {
           if (s.hash && s.status !== 'ready' && s.status !== 'error' && s.status !== 'empty') void get().reanalyze(s.id)
+          // Songs that came back empty before in-browser listening existed get another pass.
+          else if (s.status === 'ready' && !s.hits.some((h) => h.accepted) && (s.wordsSource === 'none' || s.wordsSource === 'lyrics')) void get().rescanWords(s.id)
         }
       }
       if (crates.length) rebuild(null)
@@ -304,7 +320,7 @@ export const useStore = create<State>((set, get) => {
         aliases: t.aliases,
         template: t.id,
         createdAt: Date.now(),
-        songs: t.songs.map((s) => emptySong(s.title, { padLabels: [...s.padLabels], preloadSlug: s.slug })),
+        songs: t.songs.map((s) => emptySong(s.title, { padLabels: [...s.padLabels], preloadSlug: s.slug, query: s.query })),
       }
       set((st) => ({ crates: [crate, ...st.crates] }))
       get().setActive(crate.id)
@@ -431,7 +447,9 @@ export const useStore = create<State>((set, get) => {
 
     setHit: (songId, id, patch) => {
       patchSong(songId, (s) => {
-        const hits = s.hits.map((h) => (h.id === id ? { ...h, ...patch, source: patch.start !== undefined ? 'manual' : h.source } : h))
+        const hits = s.hits.map((h) =>
+          h.id === id ? { ...h, ...patch, suggested: patch.accepted !== undefined ? false : h.suggested, source: patch.start !== undefined && h.source !== 'match' ? 'manual' : h.source } : h,
+        )
         return { hits, ...rebuildMoments({ ...s, hits }) }
       })
       rebuild(get().plan)
@@ -447,6 +465,74 @@ export const useStore = create<State>((set, get) => {
         return { hits, ...rebuildMoments({ ...s, hits }) }
       })
       rebuild(get().plan)
+    },
+
+    rescanWords: async (target) => {
+      const ids = target === 'crate' ? (activeCrate(get())?.songs.filter((s) => s.analysis && s.hash).map((s) => s.id) ?? []) : [target]
+      for (const id of ids) {
+        const song = crateOfSong(id)?.songs.find((s) => s.id === id)
+        const deps = depsFor(id)
+        if (song && deps) await rescanSongWords(song, deps)
+      }
+    },
+
+    findSimilar: async (songId, hid, scope) => {
+      const crate = crateOfSong(songId)
+      const song = crate?.songs.find((s) => s.id === songId)
+      const seedHit = song?.hits.find((h) => h.id === hid)
+      if (!crate || !song?.hash || !seedHit) return
+      set({ spotting: true, toast: `Listening for more “${crate.keyword}”…` })
+      try {
+        const targets = (scope === 'song' ? [song] : crate.songs).filter((s) => s.hash && s.analysis)
+        // Seeds: the clicked hit plus up to 2 more the user has confirmed in the same song.
+        const confirmed = song.hits.filter((h) => h.id !== hid && h.accepted && (h.source === 'manual' || h.source === 'match' || h.source === 'aligned')).slice(0, 2)
+        const pcms: { pcm: Float32Array; sr: number }[] = []
+        for (const t of targets) {
+          const src = await listeningSource(t.hash!, t.hasStems)
+          pcms.push(src ? { pcm: await toAsrInput(src.buf, src.isVocal, false), sr: 16000 } : { pcm: new Float32Array(16000), sr: 16000 })
+        }
+        const seedIdx = targets.indexOf(song)
+        // Clicks are imprecise: snap hand-marked seeds to the nearest syllable onset first.
+        const seedPcm = pcms[seedIdx].pcm
+        const seeds = [seedHit, ...confirmed].map((h) => {
+          const start = h.source === 'manual' ? refineOnset(seedPcm, 16000, h.start, 0.12) : h.start
+          return { songIndex: seedIdx, start, end: start + Math.min(0.7, Math.max(0.35, h.end - h.start)) }
+        })
+        const res = await spotInWorker(pcms, seeds)
+        let found = 0
+        let review = 0
+        targets.forEach((t, i) => {
+          const fresh: Hit[] = []
+          for (const c of res[i] ?? []) {
+            if (t.hits.some((h) => Math.abs(h.start - c.time) < 0.2)) continue
+            const auto = c.score >= AUTO_ACCEPT
+            if (auto) found++
+            else review++
+            fresh.push({
+              id: hitId(t.id), songId: t.id, text: crate.keyword, start: c.time, end: c.time + (seedHit.end - seedHit.start),
+              confidence: Math.min(1, c.score), source: 'match', accepted: auto, suggested: !auto, cluster: 0, iconic: 0,
+            })
+          }
+          if (fresh.length) patchSong(t.id, (s) => {
+            const hits = [...s.hits, ...fresh].sort((a, b) => a.start - b.start)
+            return { hits, ...rebuildMoments({ ...s, hits }), stage: `${hits.filter((h) => h.accepted).length} hits` }
+          })
+        })
+        rebuild(get().plan)
+        scheduleAutoCompose()
+        set({ toast: found || review ? `Found ${found} more “${crate.keyword}”${review ? ` · ${review} to review` : ''}` : 'No similar-sounding hits found — try marking a cleaner one' })
+      } catch (e) {
+        set({ toast: `Find all failed: ${e instanceof Error ? e.message : e}` })
+      } finally {
+        set({ spotting: false })
+      }
+    },
+
+    setLanguage: (language) => {
+      const crate = activeCrate(get())
+      if (!crate) return
+      set((st) => ({ crates: st.crates.map((c) => (c.id === crate.id ? { ...c, language } : c)) }))
+      persist()
     },
 
     setPad: (songId, pad, momentId) => {

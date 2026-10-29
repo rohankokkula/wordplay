@@ -54,7 +54,7 @@ const masterOf = (songs: BrainSong[], keyLock = true) =>
 /* ── keyword matching ───────────────────────────────────────────────── */
 
 describe('keyword matcher', () => {
-  it.each(['paisa', 'Paisaa', 'pesa', 'पैसा', 'PAISA!', 'paysa', 'paisa-paisa'])('matches %s', (w) => {
+  it.each(['paisa', 'Paisaa', 'pesa', 'पैसा', 'PAISA!', 'paysa', 'paisa-paisa', 'پیسہ', 'پیسے', 'ਪੈਸਾ', 'paise'])('matches %s', (w) => {
     expect(matchesKeyword(w, ['paisa'])).toBe(true)
   })
   it.each(['pass', 'pa', 'paani', 'masala', 'pyaar'])('rejects %s', (w) => {
